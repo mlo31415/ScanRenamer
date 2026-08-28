@@ -12,10 +12,26 @@ order the files were supplied.  The sequence number is padded with leading zeroe
 to just as many digits as the batch needs: 1...9 for nine files, 01...12 for
 twelve, 001...150 for a hundred and fifty.  Each file keeps its own extension.
 
-Files are supplied either by dropping them on the window or with the Select
-Files... button.  The order in which they are supplied is the order in which they
-are numbered; if that order is not alphabetical the user is warned and gets to
-choose between sorting them and keeping them as they came.
+Files are supplied in any of three ways:
+
+    * dropped on the window
+    * chosen with the Select Files... button
+    * picked up from a watched folder
+
+The order in which they are supplied is the order in which they are numbered; if
+that order is not alphabetical the user is warned and gets to choose between
+sorting them and keeping them as they came.  (Files from the watched folder are
+always in alphabetical order, so the question never arises for them.)
+
+The watched folder is named by the "Watch Folder=" line of "ScanRenamer
+settings.txt" in the program's directory, which is read when the program starts.
+While no files have been supplied by hand, everything in that folder which looks
+like scanner output -- a name with no spaces in it, ending in .jpg or .jpeg, so
+"{xx}.jpg" and "{xx}_nnn.jpg" both qualify -- is loaded into the batch in
+alphabetical order, and the list is kept up to date as more pages are scanned,
+until Rename is pressed.  Renamed files always have spaces in their names, so
+they are never mistaken for fresh scanner output; a rename which would produce a
+name that does look like scanner output is refused.
 
 The title string is remembered from batch to batch (and from run to run); the
 number is cleared after each successful batch, since it always changes.
@@ -27,21 +43,62 @@ back the way it was.
 
 import json
 import os
+import re
 import sys
 from datetime import datetime
 
 import wx
 
-# The persistent state: the retained title string and the table of renames done so far.
+# The settings, which the user edits, and the persistent state (the retained title string
+# and the table of renames done so far), which the program maintains.
+SettingsFileName="ScanRenamer settings.txt"
 StateFileName="ScanRenamer state.json"
 
 # Characters which Windows will not accept in a file name.
 IllegalCharacters='\\/:*?"<>|'
 
+# What scanner output looks like: a name with no whitespace in it, optionally ending in an
+# underscore and digits, with a .jpg or .jpeg extension.  Since a renamed file's name always
+# contains spaces, no renamed file can ever look like this.
+ScannerFileRegex=re.compile(r"^\S+?(_\d+)?\.jpe?g$", re.IGNORECASE)
+
+# How often the watched folder is looked at, in milliseconds.
+WatchInterval=1000
+
+
+# Where the program's own directory is.  PyInstaller unpacks a frozen program into a
+# temporary folder and points __file__ at that, so everything the *user* keeps -- the
+# settings and the state -- must be looked for beside the executable instead.
+def ProgramDirectory() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+# Read the settings file of name=value lines.  Blank lines and lines starting with '#' are
+# ignored, as is a value whose first character is '#' (a commented-out value means "unset").
+# Names are matched case-insensitive.  A missing settings file is not an error.
+def ReadSettings() -> dict[str, str]:
+    settings: dict[str, str]={}
+    try:
+        with open(os.path.join(ProgramDirectory(), SettingsFileName), "r", encoding="utf-8") as f:
+            for line in f:
+                line=line.strip()
+                if len(line) == 0 or line.startswith("#") or "=" not in line:
+                    continue
+                name, _, val=line.partition("=")
+                val=val.strip()
+                if val.startswith("#"):
+                    continue
+                settings[name.strip().casefold()]=val
+    except OSError:
+        pass
+    return settings
+
 
 # The full path of the state file, which lives in the program's own directory.
 def StateFilePath() -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), StateFileName)
+    return os.path.join(ProgramDirectory(), StateFileName)
 
 
 # Read the saved state.  A missing or damaged state file is not an error: we just start clean.
@@ -112,6 +169,22 @@ def PutBack(pairs: list[tuple[str, str]]) -> None:
             pass
 
 
+# Does this file name look like scanner output ("{xx}.jpg" or "{xx}_nnn.jpg")?
+def IsScannerFileName(name: str) -> bool:
+    return ScannerFileRegex.match(name) is not None
+
+
+# Everything in the watched folder which looks like scanner output, in alphabetical order.
+def ScannerFilesIn(folder: str) -> list[str]:
+    try:
+        names=os.listdir(folder)
+    except OSError:
+        return []       # The folder has gone away or is unreadable: nothing to pick up
+
+    paths=[os.path.join(folder, n) for n in names if IsScannerFileName(n)]
+    return Alphabetize([p for p in paths if os.path.isfile(p)])
+
+
 # Is this list of paths in alphabetical order?
 def IsAlphabetical(paths: list[str]) -> bool:
     keys=[os.path.normcase(p) for p in paths]
@@ -152,6 +225,12 @@ class ScanRenamerFrame(wx.Frame):
         self.State=ReadState()
         self.Files: list[str]=[]
 
+        # The watched folder, and whether the files now in the batch came from it.  Files
+        # supplied by hand take the batch over: the watcher leaves them alone until the
+        # batch is empty again.
+        self.WatchFolder=ReadSettings().get("watch folder", "")
+        self.FilesFromWatcher=False
+
         panel=wx.Panel(self)
         sizer=wx.BoxSizer(wx.VERTICAL)
 
@@ -176,6 +255,9 @@ class ScanRenamerFrame(wx.Frame):
         self.stStatus=wx.StaticText(panel, label="")
         sizer.Add(self.stStatus, 0, wx.ALL, 5)
 
+        self.stWatching=wx.StaticText(panel, label=self.WatchingMessage())
+        sizer.Add(self.stWatching, 0, wx.ALL, 5)
+
         buttons=wx.BoxSizer(wx.HORIZONTAL)
         self.bRename=wx.Button(panel, label="Rename")
         buttons.Add(self.bRename, 0, wx.ALL, 5)
@@ -193,17 +275,45 @@ class ScanRenamerFrame(wx.Frame):
         self.bRename.Bind(wx.EVT_BUTTON, self.OnRename)
         self.bUndo.Bind(wx.EVT_BUTTON, self.OnUndo)
         self.bExit.Bind(wx.EVT_BUTTON, self.OnExit)
+        self.Bind(wx.EVT_CLOSE, self.OnClose)
+
+        # Watch the folder, if there is one, for scans to add to the batch.
+        self.Timer=wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.OnTimer, self.Timer)
+        if len(self.WatchFolder) > 0:
+            self.Timer.Start(WatchInterval)
+            self.OnTimer(None)      # Pick up whatever is already there without waiting a tick
 
         self.UpdateControls()
         self.Centre()
 
 
+    def WatchingMessage(self) -> str:
+        if len(self.WatchFolder) == 0:
+            return f"Not watching a folder.  (Add a 'Watch Folder=' line to {SettingsFileName}.)"
+        if not os.path.isdir(self.WatchFolder):
+            return f"Watch Folder '{self.WatchFolder}' does not exist."
+        return f"Watching {self.WatchFolder}"
+
+
     # The files supplied for this batch, in the order in which they were supplied.
-    def SetFiles(self, paths: list[str]) -> None:
+    def SetFiles(self, paths: list[str], fromWatcher: bool=False) -> None:
         self.Files=[p for p in paths if os.path.isfile(p)]
+        self.FilesFromWatcher=fromWatcher and len(self.Files) > 0
         self.lbFiles.Set([os.path.basename(p) for p in self.Files])
         self.stStatus.SetLabel("")
         self.UpdateControls()
+
+
+    # Look at the watched folder.  Scans there fill an empty batch and go on being added to
+    # it as they are made, up until Rename -- but files supplied by hand are never disturbed.
+    def OnTimer(self, event) -> None:
+        if len(self.Files) > 0 and not self.FilesFromWatcher:
+            return
+
+        files=ScannerFilesIn(self.WatchFolder)
+        if files != self.Files:
+            self.SetFiles(files, fromWatcher=True)
 
 
     def UpdateControls(self) -> None:
@@ -254,6 +364,15 @@ class ScanRenamerFrame(wx.Frame):
                 files=Alphabetize(files)
 
         pairs=BuildNewNames(files, title, number)
+
+        # A renamed file must never look like fresh scanner output, or the watcher would pick
+        # it straight back up and rename it again.
+        looksScanned=[n for _, n in pairs if IsScannerFileName(os.path.basename(n))]
+        if len(looksScanned) > 0:
+            wx.MessageBox(f"{os.path.basename(looksScanned[0])} would look like a new scan, and would be "
+                          f"picked up again by the folder watcher.\n\nNothing was renamed.",
+                          "ScanRenamer", wx.OK|wx.ICON_ERROR)
+            return
 
         # A new name may be the old name of another file in the batch (the renaming is done in
         # two passes so that that works), but it may not be the name of a file outside the batch.
@@ -308,6 +427,13 @@ class ScanRenamerFrame(wx.Frame):
 
     def OnExit(self, event) -> None:
         self.Close()
+
+
+    # Stop looking at the watched folder before the window goes away, so that no timer tick
+    # arrives at a half-destroyed frame.
+    def OnClose(self, event) -> None:
+        self.Timer.Stop()
+        event.Skip()
 
 
 def main() -> None:

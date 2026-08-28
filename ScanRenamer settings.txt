@@ -1,0 +1,13 @@
+# ScanRenamer settings
+
+# Watch Folder is the folder which ScanRenamer watches for new scans.  So long as no files
+# have been supplied by hand (dropped on the window or chosen with Select Files...),
+# everything in that folder which looks like scanner output -- a name with no spaces in it
+# and a .jpg or .jpeg extension, so both "{xx}.jpg" and "{xx}_nnn.jpg" qualify -- is loaded
+# into the batch in alphabetical order, and pages are added to the list as they are scanned,
+# up until Rename is pressed.
+#
+# The line is read when ScanRenamer starts, so change it with ScanRenamer shut down.
+# With no Watch Folder line (or its value commented out with a '#'), no folder is watched.
+
+Watch Folder=#C:\Users\mlo\Documents\Scans
