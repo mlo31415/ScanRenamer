@@ -23,15 +23,15 @@ that order is not alphabetical the user is warned and gets to choose between
 sorting them and keeping them as they came.  (Files from the watched folder are
 always in alphabetical order, so the question never arises for them.)
 
-The watched folder is named by the "Watch Folder=" line of "ScanRenamer
-settings.txt" in the program's directory, which is read when the program starts.
-While no files have been supplied by hand, everything in that folder which looks
-like scanner output -- a name with no spaces in it, ending in .jpg or .jpeg, so
-"{xx}.jpg" and "{xx}_nnn.jpg" both qualify -- is loaded into the batch in
-alphabetical order, and the list is kept up to date as more pages are scanned,
-until Rename is pressed.  Renamed files always have spaces in their names, so
-they are never mistaken for fresh scanner output; a rename which would produce a
-name that does look like scanner output is refused.
+The folder to watch and the prefix the scanner names its files with come from the
+"Watch Folder=" and "Scan Prefix=" lines of "ScanRenamer settings.txt" in the
+program's directory, which is read when the program starts; watching needs both
+of them.  While no files have been supplied by hand, every file in that folder
+named "{prefix}.jpg" or "{prefix}_nnn.jpg" (.jpeg counts too) is loaded into the
+batch in alphabetical order, and the list is kept up to date as more pages are
+scanned, until Rename is pressed.  A rename which would produce a name that
+looks like scanner output is refused, so that the watcher can never pick a
+renamed file back up.
 
 The title string is remembered from batch to batch (and from run to run); the
 number is cleared after each successful batch, since it always changes.
@@ -57,10 +57,8 @@ StateFileName="ScanRenamer state.json"
 # Characters which Windows will not accept in a file name.
 IllegalCharacters='\\/:*?"<>|'
 
-# What scanner output looks like: a name with no whitespace in it, optionally ending in an
-# underscore and digits, with a .jpg or .jpeg extension.  Since a renamed file's name always
-# contains spaces, no renamed file can ever look like this.
-ScannerFileRegex=re.compile(r"^\S+?(_\d+)?\.jpe?g$", re.IGNORECASE)
+# The extensions the scanner writes.
+ScanExtensions=r"\.jpe?g"
 
 # How often the watched folder is looked at, in milliseconds.
 WatchInterval=1000
@@ -90,6 +88,9 @@ def ReadSettings() -> dict[str, str]:
                 val=val.strip()
                 if val.startswith("#"):
                     continue
+                if len(val) > 1 and val[0] == val[-1] and val[0] in "\"'":
+                    val=val[1:-1]       # A path pasted with its quotes still on it
+
                 settings[name.strip().casefold()]=val
     except OSError:
         pass
@@ -169,19 +170,22 @@ def PutBack(pairs: list[tuple[str, str]]) -> None:
             pass
 
 
-# Does this file name look like scanner output ("{xx}.jpg" or "{xx}_nnn.jpg")?
-def IsScannerFileName(name: str) -> bool:
-    return ScannerFileRegex.match(name) is not None
+# Is this file name scanner output: the scanner's own prefix, optionally followed by an
+# underscore and digits, with a scan extension?  With no prefix supplied, nothing is.
+def IsScannerFileName(name: str, prefix: str) -> bool:
+    if len(prefix) == 0:
+        return False
+    return re.fullmatch(re.escape(prefix)+r"(_\d+)?"+ScanExtensions, name, re.IGNORECASE) is not None
 
 
-# Everything in the watched folder which looks like scanner output, in alphabetical order.
-def ScannerFilesIn(folder: str) -> list[str]:
+# Everything in the watched folder which is scanner output, in alphabetical order.
+def ScannerFilesIn(folder: str, prefix: str) -> list[str]:
     try:
         names=os.listdir(folder)
     except OSError:
         return []       # The folder has gone away or is unreadable: nothing to pick up
 
-    paths=[os.path.join(folder, n) for n in names if IsScannerFileName(n)]
+    paths=[os.path.join(folder, n) for n in names if IsScannerFileName(n, prefix)]
     return Alphabetize([p for p in paths if os.path.isfile(p)])
 
 
@@ -225,10 +229,12 @@ class ScanRenamerFrame(wx.Frame):
         self.State=ReadState()
         self.Files: list[str]=[]
 
-        # The watched folder, and whether the files now in the batch came from it.  Files
-        # supplied by hand take the batch over: the watcher leaves them alone until the
-        # batch is empty again.
-        self.WatchFolder=ReadSettings().get("watch folder", "")
+        # The watched folder and the scanner's prefix, and whether the files now in the batch
+        # came from the watcher.  Files supplied by hand take the batch over: the watcher
+        # leaves them alone until the batch is empty again.
+        settings=ReadSettings()
+        self.WatchFolder=settings.get("watch folder", "")
+        self.ScanPrefix=settings.get("scan prefix", "")
         self.FilesFromWatcher=False
 
         panel=wx.Panel(self)
@@ -280,7 +286,7 @@ class ScanRenamerFrame(wx.Frame):
         # Watch the folder, if there is one, for scans to add to the batch.
         self.Timer=wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.OnTimer, self.Timer)
-        if len(self.WatchFolder) > 0:
+        if self.Watching():
             self.Timer.Start(WatchInterval)
             self.OnTimer(None)      # Pick up whatever is already there without waiting a tick
 
@@ -288,12 +294,19 @@ class ScanRenamerFrame(wx.Frame):
         self.Centre()
 
 
+    # Watching needs both a folder to watch and the prefix to watch for.
+    def Watching(self) -> bool:
+        return len(self.WatchFolder) > 0 and len(self.ScanPrefix) > 0
+
+
     def WatchingMessage(self) -> str:
         if len(self.WatchFolder) == 0:
             return f"Not watching a folder.  (Add a 'Watch Folder=' line to {SettingsFileName}.)"
+        if len(self.ScanPrefix) == 0:
+            return f"Not watching a folder.  (Add a 'Scan Prefix=' line to {SettingsFileName}.)"
         if not os.path.isdir(self.WatchFolder):
             return f"Watch Folder '{self.WatchFolder}' does not exist."
-        return f"Watching {self.WatchFolder}"
+        return f"Watching {self.WatchFolder} for {self.ScanPrefix}*.jpg"
 
 
     # The files supplied for this batch, in the order in which they were supplied.
@@ -311,7 +324,7 @@ class ScanRenamerFrame(wx.Frame):
         if len(self.Files) > 0 and not self.FilesFromWatcher:
             return
 
-        files=ScannerFilesIn(self.WatchFolder)
+        files=ScannerFilesIn(self.WatchFolder, self.ScanPrefix)
         if files != self.Files:
             self.SetFiles(files, fromWatcher=True)
 
@@ -367,7 +380,7 @@ class ScanRenamerFrame(wx.Frame):
 
         # A renamed file must never look like fresh scanner output, or the watcher would pick
         # it straight back up and rename it again.
-        looksScanned=[n for _, n in pairs if IsScannerFileName(os.path.basename(n))]
+        looksScanned=[n for _, n in pairs if IsScannerFileName(os.path.basename(n), self.ScanPrefix)]
         if len(looksScanned) > 0:
             wx.MessageBox(f"{os.path.basename(looksScanned[0])} would look like a new scan, and would be "
                           f"picked up again by the folder watcher.\n\nNothing was renamed.",

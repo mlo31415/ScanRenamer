@@ -30,23 +30,26 @@ program.
 
 ## The watched folder
 
-`ScanRenamer settings.txt`, in the program's directory, names the folder to watch:
+`ScanRenamer settings.txt`, in the program's directory, names the folder to watch and the
+prefix the scanner gives its files:
 
-    Watch Folder=C:\Users\mlo\Documents\Scans
+    Watch Folder=C:\Users\mlo\Documents\usr\Scanning
+    Scan Prefix=z-
 
-The line is read when ScanRenamer starts, so change it with the program shut down.  With no
-such line -- or with its value commented out, `Watch Folder=#...` -- no folder is watched and
-the window says so.
+A path may be quoted or not, as you please.  The lines are read when ScanRenamer starts, so
+change them with the program shut down.  Watching needs both of them: with either line
+missing -- or its value commented out, `Watch Folder=#...` -- nothing is watched for, and the
+window says so.
 
-So long as nothing has been supplied by hand, everything in that folder which looks like
-scanner output is loaded into the batch in alphabetical order, and pages go on being added to
-the list as they are scanned, up until **Rename** is pressed.  Files supplied by hand take
-the batch over; the watcher leaves them alone until the batch is empty again.
+So long as nothing has been supplied by hand, every file in that folder named `{prefix}.jpg`
+or `{prefix}_nnn.jpg` (`.jpeg` counts too, and case is ignored) is loaded into the batch in
+alphabetical order, and pages go on being added to the list as they are scanned, up until
+**Rename** is pressed.  With the settings above that means `z-.jpg`, `z-_001.jpg`,
+`z-_002.jpg`... and nothing else in the folder.  Files supplied by hand take the batch over;
+the watcher leaves them alone until the batch is empty again.
 
-"Looks like scanner output" means a name with no spaces in it and a `.jpg` or `.jpeg`
-extension, so both `{xx}.jpg` and `{xx}_nnn.jpg` qualify (as does any other spaceless name).
-A renamed file always has spaces in its name, so it can never be mistaken for a new scan; a
-rename which would produce a scanner-looking name is refused rather than done.
+A rename which would produce a scanner-looking name is refused rather than done, so a renamed
+file can never be picked back up by the watcher.
 
 The watcher does not wait for the scanner to finish writing a page, so a file can appear in
 the list a moment before it is complete.  Press **Rename** when the scanning is done: a file
