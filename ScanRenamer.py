@@ -18,6 +18,11 @@ Files are supplied in any of three ways:
     * chosen with the Select Files... button
     * picked up from a watched folder
 
+The batch is shown two columns wide -- each file on the left and the name it
+would be renamed to on the right, the two being columns of one list so that they
+cannot scroll apart.  The proposed names follow the name and number as they are
+typed.
+
 The order in which they are supplied is the order in which they are numbered; if
 that order is not alphabetical the user is warned and gets to choose between
 sorting them and keeping them as they came.  (Files from the watched folder are
@@ -224,7 +229,7 @@ class ScanRenamerDropTarget(wx.FileDropTarget):
 
 class ScanRenamerFrame(wx.Frame):
     def __init__(self) -> None:
-        wx.Frame.__init__(self, None, title="ScanRenamer", size=wx.Size(460, 480))
+        wx.Frame.__init__(self, None, title="ScanRenamer", size=wx.Size(760, 520))
 
         self.State=ReadState()
         self.Files: list[str]=[]
@@ -245,8 +250,12 @@ class ScanRenamerFrame(wx.Frame):
         self.bSelect=wx.Button(panel, label="Select Files...")
         sizer.Add(self.bSelect, 0, wx.ALL, 5)
 
-        self.lbFiles=wx.ListBox(panel, style=wx.LB_SINGLE)
-        sizer.Add(self.lbFiles, 1, wx.EXPAND|wx.ALL, 5)
+        # The batch: each supplied file on the left, the name it would be renamed to on the
+        # right.  The two are columns of one list control, so they cannot scroll apart.
+        self.lcFiles=wx.ListCtrl(panel, style=wx.LC_REPORT|wx.LC_SINGLE_SEL)
+        self.lcFiles.InsertColumn(0, "File")
+        self.lcFiles.InsertColumn(1, "Renamed to")
+        sizer.Add(self.lcFiles, 1, wx.EXPAND|wx.ALL, 5)
 
         grid=wx.FlexGridSizer(2, 2, 5, 5)
         grid.AddGrowableCol(1)
@@ -275,8 +284,15 @@ class ScanRenamerFrame(wx.Frame):
         sizer.Add(buttons, 0, wx.EXPAND)
 
         panel.SetSizer(sizer)
-        panel.SetDropTarget(ScanRenamerDropTarget(self))
 
+        # Files may be dropped anywhere on the window.  The list fills most of it and would
+        # otherwise swallow the drops itself, so it gets a drop target of its own.
+        panel.SetDropTarget(ScanRenamerDropTarget(self))
+        self.lcFiles.SetDropTarget(ScanRenamerDropTarget(self))
+
+        self.lcFiles.Bind(wx.EVT_SIZE, self.OnListResized)
+        self.tTitle.Bind(wx.EVT_TEXT, self.OnNameOrNumberChanged)
+        self.tNumber.Bind(wx.EVT_TEXT, self.OnNameOrNumberChanged)
         self.bSelect.Bind(wx.EVT_BUTTON, self.OnSelect)
         self.bRename.Bind(wx.EVT_BUTTON, self.OnRename)
         self.bUndo.Bind(wx.EVT_BUTTON, self.OnUndo)
@@ -313,9 +329,53 @@ class ScanRenamerFrame(wx.Frame):
     def SetFiles(self, paths: list[str], fromWatcher: bool=False) -> None:
         self.Files=[p for p in paths if os.path.isfile(p)]
         self.FilesFromWatcher=fromWatcher and len(self.Files) > 0
-        self.lbFiles.Set([os.path.basename(p) for p in self.Files])
+
+        self.lcFiles.DeleteAllItems()
+        for i, path in enumerate(self.Files):
+            self.lcFiles.InsertItem(i, os.path.basename(path))
+        self.UpdateProposedNames()
+
         self.stStatus.SetLabel("")
         self.UpdateControls()
+
+
+    # The names the files would be renamed to, as things stand.  While the name and number
+    # are not both filled in there is nothing to propose.
+    def ProposedNames(self) -> list[str]:
+        title=self.tTitle.GetValue().strip()
+        number=self.tNumber.GetValue().strip()
+        if len(title) == 0 or len(number) == 0:
+            return [""]*len(self.Files)
+        return [os.path.basename(new) for _, new in BuildNewNames(self.Files, title, number)]
+
+
+    # Show the proposed names in the right-hand column.
+    def UpdateProposedNames(self) -> None:
+        for i, new in enumerate(self.ProposedNames()):
+            self.lcFiles.SetItem(i, 1, new)
+        self.SizeColumns()
+
+
+    # Each column is wide enough for what is in it, and the right-hand one then takes up
+    # whatever room is left over, so that the display looks like the two halves it is.
+    def SizeColumns(self) -> None:
+        autosize=wx.LIST_AUTOSIZE if self.lcFiles.GetItemCount() > 0 else wx.LIST_AUTOSIZE_USEHEADER
+        self.lcFiles.SetColumnWidth(0, autosize)
+        self.lcFiles.SetColumnWidth(1, autosize)
+
+        slack=self.lcFiles.GetClientSize().width-self.lcFiles.GetColumnWidth(0)-self.lcFiles.GetColumnWidth(1)
+        if slack > 0:
+            self.lcFiles.SetColumnWidth(1, self.lcFiles.GetColumnWidth(1)+slack)
+
+
+    def OnNameOrNumberChanged(self, event) -> None:
+        self.UpdateProposedNames()
+
+
+    # Widening the window widens the right-hand half with it.
+    def OnListResized(self, event) -> None:
+        self.SizeColumns()
+        event.Skip()
 
 
     # Look at the watched folder.  Scans there fill an empty batch and go on being added to

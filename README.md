@@ -17,10 +17,16 @@ Each file keeps its own extension.
 ## Using it
 
 Supply the files in any of three ways: drop them on the window, choose them with **Select
-Files...**, or let ScanRenamer pick them up from a watched folder (below).  The order in
-which they are supplied is the order in which they are numbered.  If that order is not
-alphabetical, ScanRenamer says so and offers a choice of sorting them alphabetically,
-numbering them as supplied, or cancelling.
+Files...**, or let ScanRenamer pick them up from a watched folder (below).
+
+The batch is shown two columns wide: each file on the left, and on the right the name it
+would be renamed to, which follows the name and number as they are typed.  They are the two
+columns of a single list, so they scroll as one and cannot drift apart.
+
+The order in which the files are supplied is the order in which they are numbered.  If that
+order is not alphabetical, ScanRenamer says so and offers a choice of sorting them
+alphabetically, numbering them as supplied, or cancelling.  Choosing to sort renumbers them,
+so the names actually given are not the ones the right-hand column was showing.
 
 Type the name and the number and press **Rename**.  The name is kept for the next batch (and
 for the next run of the program); the number is blanked, since it is always different.
