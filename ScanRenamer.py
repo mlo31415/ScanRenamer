@@ -46,7 +46,9 @@ number is cleared after each successful batch, since it always changes.
 
 Every batch is written to "ScanRenamer state.json" alongside this program as a
 table of old-name/new-name pairs, and Undo Last Rename puts the most recent batch
-back the way it was.
+back the way it was -- including the number it was renamed with, which goes back
+into the dialog so that the batch can be done again with whatever needed
+correcting.
 """
 
 import json
@@ -511,6 +513,8 @@ class ScanRenamerFrame(wx.Frame):
         # blank the number, which will always be different next time.
         self.State["Title"]=title
         self.State["Batches"].append({"When": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                      "Title": title,
+                                      "Number": number,
                                       "Renames": [[o, n] for o, n in pairs]})
         WriteState(self.State)
 
@@ -539,6 +543,14 @@ class ScanRenamerFrame(wx.Frame):
 
         self.State["Batches"].pop()
         WriteState(self.State)
+
+        # Renaming blanks the number.  Undoing the rename puts it back, so that the batch just
+        # undone can be done again with whatever needed correcting.  Anything typed in the
+        # meantime is left alone -- this fills the boxes in, it never overwrites them.
+        if len(self.tNumber.GetValue().strip()) == 0:
+            self.tNumber.SetValue(batch.get("Number", ""))
+        if len(self.tTitle.GetValue().strip()) == 0:
+            self.tTitle.SetValue(batch.get("Title", ""))
 
         self.stStatus.SetLabel(f"Undid the rename of {len(pairs)} files.")
         self.UpdateControls()

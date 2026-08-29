@@ -70,10 +70,15 @@ the scanner still has open cannot be renamed, and the whole batch would be rolle
 
 ## ScanRenamer state.json
 
-The retained name and a table of every batch renamed -- when it was done and each
-old-name/new-name pair -- are kept in `ScanRenamer state.json` in the program's directory.
-Undo works off the last entry in that table and removes it when it succeeds.  The file is
-per-installation and is not in the repository.
+The retained name and a table of every batch renamed -- when it was done, the name and number
+it was renamed with, and each old-name/new-name pair -- are kept in `ScanRenamer state.json`
+in the program's directory.  Undo works off the last entry in that table and removes it when
+it succeeds.  The file is per-installation and is not in the repository.
+
+Because renaming blanks the number, undoing a rename puts that batch's number (and its name,
+if the box has since been emptied) back into the dialog, so the batch can be done again with
+whatever needed correcting.  A number typed since the rename is left alone -- undo fills the
+boxes in, it never overwrites them.
 
 ## Running it
 
