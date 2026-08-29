@@ -71,6 +71,11 @@ ScanExtensions=r"\.jpe?g"
 # How often the watched folder is looked at, in milliseconds.
 WatchInterval=1000
 
+# The gap between the two columns of the display, in 96-to-the-inch units: about a third of
+# an inch.  It is turned into real pixels with FromDIP(), so it stays a third of an inch on
+# a high-resolution screen too.
+ColumnGap=32
+
 
 # Where the program's own directory is.  PyInstaller unpacks a frozen program into a
 # temporary folder and points __file__ at that, so everything the *user* keeps -- the
@@ -245,6 +250,9 @@ class ScanRenamerFrame(wx.Frame):
         # The watched folder and the scanner's prefix, and whether the files now in the batch
         # came from the watcher.  Files supplied by hand take the batch over: the watcher
         # leaves them alone until the batch is empty again.
+        self.SizingColumns=False        # Guards against SizeColumns setting itself off again
+        self.LastListWidth=-1           # The width the columns were last sized to fit
+
         settings=ReadSettings()
         self.WatchFolder=settings.get("watch folder", "")
         self.ScanPrefix=settings.get("scan prefix", "")
@@ -369,25 +377,50 @@ class ScanRenamerFrame(wx.Frame):
         self.SizeColumns()
 
 
-    # Each column is wide enough for what is in it, and the right-hand one then takes up
-    # whatever room is left over, so that the display looks like the two halves it is.
+    # Each column is wide enough for what is in it, with a gap between the two of them, and
+    # the right-hand one then takes up whatever room is left over, so that the display looks
+    # like the two halves it is.
     def SizeColumns(self) -> None:
-        autosize=wx.LIST_AUTOSIZE if self.lcFiles.GetItemCount() > 0 else wx.LIST_AUTOSIZE_USEHEADER
-        self.lcFiles.SetColumnWidth(0, autosize)
-        self.lcFiles.SetColumnWidth(1, autosize)
+        # Setting a column width can itself provoke a size event, and this is called from
+        # one: without the guard the two would chase each other round and round.
+        if self.SizingColumns:
+            return
+        self.SizingColumns=True
+        try:
+            autosize=wx.LIST_AUTOSIZE if self.lcFiles.GetItemCount() > 0 else wx.LIST_AUTOSIZE_USEHEADER
+            self.lcFiles.SetColumnWidth(0, autosize)
+            self.lcFiles.SetColumnWidth(0, self.lcFiles.GetColumnWidth(0)+self.FromDIP(ColumnGap))
+            self.lcFiles.SetColumnWidth(1, autosize)
 
-        slack=self.lcFiles.GetClientSize().width-self.lcFiles.GetColumnWidth(0)-self.lcFiles.GetColumnWidth(1)
-        if slack > 0:
-            self.lcFiles.SetColumnWidth(1, self.lcFiles.GetColumnWidth(1)+slack)
+            # Stop short of the full width.  Filling it exactly brings up a horizontal
+            # scrollbar, and a scrollbar which appears and disappears again is another way
+            # for this to chase its own tail.
+            room=self.lcFiles.GetClientSize().width-self.FromDIP(ColumnGap)
+            slack=room-self.lcFiles.GetColumnWidth(0)-self.lcFiles.GetColumnWidth(1)
+            if slack > 0:
+                self.lcFiles.SetColumnWidth(1, self.lcFiles.GetColumnWidth(1)+slack)
+
+            # Remember the width these columns were sized for.  Recording it here, at the end
+            # of the outermost pass, means a size event carrying a width we have not actually
+            # sized for is never taken for one we have.
+            self.LastListWidth=self.lcFiles.GetClientSize().width
+        finally:
+            self.SizingColumns=False
 
 
     def OnNameOrNumberChanged(self, event) -> None:
         self.UpdateProposedNames()
 
 
-    # Widening the window widens the right-hand half with it.
+    # Widening the window widens the right-hand half with it.  Size events which leave the
+    # width alone -- and the ones setting a column width provokes are all of that kind --
+    # are ignored, so that resizing the columns cannot start the whole thing over again.
+    # The sizing is put off until the event has been dealt with: during the event the control
+    # may not have taken up its new width yet, and sizing the columns to the old one would
+    # leave them wrong with no further event coming to put them right.
     def OnListResized(self, event) -> None:
-        self.SizeColumns()
+        if self.lcFiles.GetClientSize().width != self.LastListWidth:
+            wx.CallAfter(self.SizeColumns)
         event.Skip()
 
 
