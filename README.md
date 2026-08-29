@@ -65,15 +65,17 @@ program.
 ## Nothing is ever overwritten
 
 A rename never writes over an existing file.  Before anything is renamed, ScanRenamer looks
-for two kinds of trouble:
+the whole batch over for three kinds of trouble:
 
 * a file which would land on a name already belonging to a file which is not part of the
-  batch, and
-* two files of the batch which would end up with the same name.
+  batch,
+* two files of the batch which would end up with the same name, and
+* the same file supplied twice -- which would otherwise stop the batch part way through with
+  a mystifying complaint about a file that cannot be found.
 
-Either one is reported, naming both the file being renamed and the file standing in its way
-(with the folder it is in), and the whole batch is left exactly as it was -- it is never a
-matter of some files being renamed and others not.
+Any of them is reported, naming the files it is about (with the folder they are in), and the
+whole batch is left exactly as it was -- it is never a matter of some files being renamed and
+others not.
 
 Undo is protected the same way: a scan made since the rename may well have been given one of
 the names the batch is about to go back to, and if so nothing is put back.
@@ -115,7 +117,9 @@ the scanner still has open cannot be renamed, and the whole batch would be rolle
 The retained name and a table of every batch renamed -- when it was done, the name and number
 it was renamed with, and each old-name/new-name pair -- are kept in `ScanRenamer state.json`
 in the program's directory.  Undo works off the last entry in that table and removes it when
-it succeeds.  The file is per-installation and is not in the repository.
+it succeeds, so pressing it again walks back through the batches before it.  The last 50 are
+kept -- the file is read and written whole at every rename, so there is nothing to be gained
+by letting it grow for ever.  The file is per-installation and is not in the repository.
 
 Because renaming blanks the number, undoing a rename puts that batch's number (and its name,
 if the box has since been emptied) back into the dialog, so the batch can be done again with

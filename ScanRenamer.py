@@ -48,12 +48,13 @@ scanned, until Rename is pressed.  A rename which would produce a name that
 looks like scanner output is refused, so that the watcher can never pick a
 renamed file back up.
 
-Nothing is ever renamed over the top of an existing file.  Anything in the way --
-a file of the batch which would land on a name already taken by a file outside
-it, or two files of the batch which would end up with the same name -- is
-reported, naming both the file being renamed and the file standing in its way,
-and the whole batch is left alone.  The same goes for undoing a rename, where a
-scan made since may have taken one of the names the batch is going back to.
+Nothing is ever renamed over the top of an existing file.  The whole batch is
+looked over first and anything which would go wrong is reported, naming the
+files it is about, and nothing at all is renamed: a file which would land on a
+name already taken by a file outside the batch, two files of the batch which
+would end up with the same name, or the same file supplied twice.  The same
+looking-over is done before undoing a rename, where a scan made since may have
+taken one of the names the batch is going back to.
 
 The title string is remembered from batch to batch (and from run to run); the
 number is cleared after each successful batch, since it always changes.
@@ -62,10 +63,12 @@ Every batch is written to "ScanRenamer state.json" alongside this program as a
 table of old-name/new-name pairs, and Undo Last Rename puts the most recent batch
 back the way it was -- including the number it was renamed with, which goes back
 into the dialog so that the batch can be done again with whatever needed
-correcting.  The file is written by making a new one and putting it in the old
-one's place, so that stopping half way through cannot destroy the table; and a
-state file which cannot be read is put aside under its own name rather than
-being written over.
+correcting.  The last fifty batches are kept, that being as far back as anything
+can be undone; the file is read and written whole every time a batch is renamed,
+so there is no sense in letting it grow for ever.  It is written by making a new
+file and putting it in the old one's place, so that stopping half way through
+cannot destroy the table; and a state file which cannot be read is put aside
+under its own name rather than being written over.
 
 A rename which is interrupted part way -- the program killed, the machine losing
 power -- leaves the files it had already moved under temporary names ending in
@@ -99,6 +102,11 @@ TempSuffix=".ScanRenamerTmp"
 
 # How often the watched folder is looked at, in milliseconds.
 WatchInterval=1000
+
+# How many batches the state file keeps.  Undo walks back through them one at a time, so this
+# is how far back a rename can be undone; the older ones are only so much weight in the file,
+# which is read and written whole every time a batch is renamed.
+MaxBatchesKept=50
 
 # The gap between the two columns of the display, in 96-to-the-inch units: about a third of
 # an inch.  It is turned into real pixels with FromDIP(), so it stays a third of an inch on
@@ -230,14 +238,26 @@ def RenameFiles(pairs: list[tuple[str, str]]) -> str:
     return ""
 
 
-# Look for anything these renames would overwrite, and say what it is.  Returns "" when
-# there is nothing in the way, and otherwise a line for each conflict, naming both the file
-# being renamed and the file standing in its way.
+# Look for anything which would make these renames go wrong, and say what it is.  Returns ""
+# when there is nothing in the way, and otherwise a line for each conflict, naming the files
+# it is about.
 # A new name which is the old name of another file in the batch is not a conflict: the
 # renaming is done in two passes so that a batch may shuffle its own names about freely.
 def ConflictReport(pairs: list[tuple[str, str]]) -> str:
     olds={os.path.normcase(old) for old, _ in pairs}
     conflicts: list[str]=[]
+
+    # The same file supplied twice.  Only the first of the two could be renamed, and the
+    # second would be looked for under a name which by then belongs to nothing, stopping the
+    # batch part way with an error about a file which cannot be found.
+    supplied: dict[str, str]={}
+    for old, new in pairs:
+        key=os.path.normcase(old)
+        if key in supplied:
+            conflicts.append(f"{os.path.basename(old)} is in the batch twice, and would have to become "
+                             f"both {os.path.basename(supplied[key])} and {os.path.basename(new)}")
+        else:
+            supplied[key]=new
 
     # Two files of the batch which would end up with the same name.  One would overwrite
     # the other, and which of them survived would be a matter of luck.
@@ -493,7 +513,7 @@ class ScanRenamerFrame(wx.Frame):
 
         report=ConflictReport(leftovers)
         if report != "":
-            wx.MessageBox(f"Putting them back would overwrite a file:\n\n{report}\n\nNothing was put back.",
+            wx.MessageBox(f"They cannot be put back as things stand:\n\n{report}\n\nNothing was put back.",
                           "ScanRenamer", wx.OK|wx.ICON_ERROR)
             return
 
@@ -690,7 +710,7 @@ class ScanRenamerFrame(wx.Frame):
         # Nothing is ever renamed over the top of an existing file.
         report=ConflictReport(pairs)
         if report != "":
-            wx.MessageBox(f"Renaming would overwrite a file:\n\n{report}\n\nNothing was renamed.",
+            wx.MessageBox(f"The batch cannot be renamed as it stands:\n\n{report}\n\nNothing was renamed.",
                           "ScanRenamer", wx.OK|wx.ICON_ERROR)
             return
 
@@ -706,6 +726,7 @@ class ScanRenamerFrame(wx.Frame):
                                       "Title": title,
                                       "Number": number,
                                       "Renames": [[o, n] for o, n in pairs]})
+        self.State["Batches"]=self.State["Batches"][-MaxBatchesKept:]
         WriteState(self.State)
 
         self.tNumber.SetValue("")
@@ -730,7 +751,7 @@ class ScanRenamerFrame(wx.Frame):
         # well have been given one of the names the batch is about to go back to.
         report=ConflictReport(pairs)
         if report != "":
-            wx.MessageBox(f"Putting the files back would overwrite a file:\n\n{report}\n\n"
+            wx.MessageBox(f"The files cannot be put back as things stand:\n\n{report}\n\n"
                           f"Nothing was put back.", "ScanRenamer", wx.OK|wx.ICON_ERROR)
             return
 
