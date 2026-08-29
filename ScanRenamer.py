@@ -18,9 +18,17 @@ Files are supplied in any of three ways:
     * chosen with the Select Files... button
     * picked up from a watched folder
 
+Rename works on the whole batch, or on one unbroken run of files picked out in
+the list -- click the first and shift-click the last.  A run is numbered from one
+like any other batch, and the files not picked out stay where they are, still in
+the batch to be renamed in their turn: two issues scanned one after the other
+into the same folder can be named an issue at a time without stopping.  A
+selection with a gap in it is refused rather than guessed at.
+
 The batch is shown two columns wide -- each file on the left and the name it
 would be renamed to on the right, the two being columns of one list so that they
-cannot scroll apart.  The proposed names follow the name and number keystroke by
+cannot scroll apart.  Only the files which would be renamed have a name against
+them: picking out a run leaves the rest of the column empty.  The proposed names follow the name and number keystroke by
 keystroke, from the first character typed; whichever of the two has not been
 filled in yet is simply left out of them.  With neither filled in there is only
 the page numbering to show, and it is spaced out as "p 01.jpg" to look like the
@@ -465,7 +473,7 @@ class ScanRenamerFrame(wx.Frame):
 
         # The batch: each supplied file on the left, the name it would be renamed to on the
         # right.  The two are columns of one list control, so they cannot scroll apart.
-        self.lcFiles=wx.ListCtrl(panel, style=wx.LC_REPORT|wx.LC_SINGLE_SEL)
+        self.lcFiles=wx.ListCtrl(panel, style=wx.LC_REPORT)
         self.lcFiles.InsertColumn(0, "File")
         self.lcFiles.InsertColumn(1, "Renamed to")
         sizer.Add(self.lcFiles, 1, wx.EXPAND|wx.ALL, 5)
@@ -506,6 +514,8 @@ class ScanRenamerFrame(wx.Frame):
         self.lcFiles.SetDropTarget(ScanRenamerDropTarget(self))
 
         self.lcFiles.Bind(wx.EVT_SIZE, self.OnListResized)
+        self.lcFiles.Bind(wx.EVT_LIST_ITEM_SELECTED, self.OnSelectionChanged)
+        self.lcFiles.Bind(wx.EVT_LIST_ITEM_DESELECTED, self.OnSelectionChanged)
         self.tTitle.Bind(wx.EVT_TEXT, self.OnNameOrNumberChanged)
         self.tNumber.Bind(wx.EVT_TEXT, self.OnNameOrNumberChanged)
         self.bSelect.Bind(wx.EVT_BUTTON, self.OnSelect)
@@ -607,18 +617,40 @@ class ScanRenamerFrame(wx.Frame):
         self.UpdateControls()
 
 
+    # Which rows of the list are picked out, in the order they are in.
+    def SelectedRows(self) -> list[int]:
+        rows=[]
+        row=self.lcFiles.GetFirstSelected()
+        while row != -1:
+            rows.append(row)
+            row=self.lcFiles.GetNextSelected(row)
+        return rows
+
+
+    # The rows Rename would work on: the ones picked out, or the whole batch when none are.
+    def RowsToRename(self) -> list[int]:
+        rows=self.SelectedRows()
+        return rows if len(rows) > 0 else list(range(len(self.Files)))
+
+
     # The names the files would be renamed to, as things stand -- which is shown from the
     # first character typed, with whatever part of the name has been supplied so far.
+    # Only the rows Rename would work on have a name to show: picking out a few files leaves
+    # the rest of the column empty, those files being left where they are for now.
     def ProposedNames(self) -> list[str]:
         title=self.tTitle.GetValue().strip()
         number=self.tNumber.GetValue().strip()
-        names=[os.path.basename(new) for _, new in BuildNewNames(self.Files, title, number)]
+
+        rows=self.RowsToRename()
+        names=[""]*len(self.Files)
+        for row, (_, new) in zip(rows, BuildNewNames([self.Files[r] for r in rows], title, number)):
+            names[row]=os.path.basename(new)
 
         # With nothing typed at all there is only the page numbering to show, and it is
         # spaced out as "p 01.jpg" to look like the placeholder it is.  The moment anything
         # is typed the space goes and the names are the real ones.
         if len(title) == 0 and len(number) == 0:
-            names=[f"p {n[1:]}" for n in names]
+            names=[f"p {n[1:]}" if len(n) > 0 else "" for n in names]
         return names
 
 
@@ -671,6 +703,13 @@ class ScanRenamerFrame(wx.Frame):
 
     def OnNameOrNumberChanged(self, event) -> None:
         self.UpdateProposedNames()
+
+
+    # Picking rows out changes which files would be renamed, and so what the right-hand
+    # column has to say.
+    def OnSelectionChanged(self, event) -> None:
+        self.UpdateProposedNames()
+        event.Skip()
 
 
     # Widening the window widens the right-hand half with it.  Size events which leave the
@@ -732,11 +771,21 @@ class ScanRenamerFrame(wx.Frame):
             wx.MessageBox(f"The name and number may not contain {' '.join(bad)}", "ScanRenamer", wx.OK|wx.ICON_INFORMATION)
             return
 
+        # Rename picks out rows if any are picked out, and the whole batch if none are.  A
+        # broken selection is refused rather than guessed at: the files are being numbered in
+        # a run, and which files that run is made of has to be beyond doubt.
+        rows=self.RowsToRename()
+        if rows != list(range(rows[0], rows[0]+len(rows))):
+            wx.MessageBox("The files picked out are not all together.\n\nRename works on one unbroken run of "
+                          "files -- click the first and shift-click the last -- or on the whole batch when "
+                          "none are picked out.", "ScanRenamer", wx.OK|wx.ICON_INFORMATION)
+            return
+
         # The files are numbered in the order in which they were supplied.  If that is not
         # name order, the user needs to know about it and to say what to do.
         # Files from the watcher are not asked about: they are already in the order the
         # scanner made them, which is name order and is the order wanted.
-        files=self.Files
+        files=[self.Files[r] for r in rows]
         if not self.FilesFromWatcher and not IsInNameOrder(files):
             dlg=wx.MessageDialog(self, "These files are not in name order.\n\n"
                                        "Sort by name:  sort them and number them in that order.  Names are "
@@ -755,7 +804,16 @@ class ScanRenamerFrame(wx.Frame):
                 # never shown, the batch is put in order and left there to be looked at: the
                 # column now says what would happen, and Rename does it.  The question will
                 # not be asked a second time, the batch being in name order by then.
-                self.SetFiles(SortByName(files))
+                # Only the rows being renamed are re-ordered, and they stay picked out.
+                ordered=list(self.Files)
+                for row, path in zip(rows, SortByName(files)):
+                    ordered[row]=path
+                self.SetFiles(ordered, fromWatcher=self.FilesFromWatcher)
+                for row in self.SelectedRows():
+                    self.lcFiles.Select(row, False)
+                if len(rows) < len(self.Files):
+                    for row in rows:
+                        self.lcFiles.Select(row)
                 self.stStatus.SetLabel("Sorted into name order.  Check the new names and press Rename again.")
                 return
 
@@ -792,9 +850,17 @@ class ScanRenamerFrame(wx.Frame):
         self.State["Batches"]=self.State["Batches"][-MaxBatchesKept:]
         WriteState(self.State)
 
+        # The files just renamed leave the batch; anything else stays where it is, ready to be
+        # renamed in its turn -- a second run of scans in the same folder, with its own number.
+        # (When the whole batch was renamed this empties it, as it always did.)
+        fromWatcher=self.FilesFromWatcher
+        renamed={os.path.normcase(old) for old, _ in pairs}
+        remaining=[p for p in self.Files if os.path.normcase(p) not in renamed]
+
         self.tNumber.SetValue("")
-        self.SetFiles([])
-        self.stStatus.SetLabel(f"Renamed {len(pairs)} files.")
+        self.SetFiles(remaining, fromWatcher=fromWatcher)
+        self.stStatus.SetLabel(f"Renamed {len(pairs)} files." if len(remaining) == 0 else
+                               f"Renamed {len(pairs)} files.  {len(remaining)} left in the batch.")
 
         # The number is the next thing wanted -- the name stays as it is, and the batch after
         # this one is the same publication's next issue -- so the cursor is put there ready.

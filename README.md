@@ -25,6 +25,22 @@ The batch is shown two columns wide: each file on the left, and on the right the
 would be renamed to.  They are the two columns of a single list, so they scroll as one and
 cannot drift apart.
 
+### Renaming part of a batch
+
+**Rename** works on the whole batch, or on one unbroken run of files picked out in the list --
+click the first and shift-click the last.  Only the files which would be renamed have a name
+against them, so picking out a run leaves the rest of the right-hand column empty and it is
+plain what is about to happen.
+
+A run is numbered from `p1` like any other batch, and the files not picked out stay in the
+batch afterwards, still listed and ready for a rename of their own.  Two issues scanned one
+after the other into the same folder can therefore be named an issue at a time: pick out the
+first issue's pages, give them their number, Rename; what is left is the second issue, and the
+Number box is already empty and waiting.
+
+A selection with a gap in it is refused rather than guessed at -- the files are being numbered
+in a run, so which files that run is made of has to be beyond doubt.
+
 The proposed names are regenerated at every keystroke, from the first character typed.
 Whichever of the name and the number has not been filled in yet is left out of them, so
 typing just `Spaceways` shows `Spaceways p01.jpg` and the number slots itself in as it is
