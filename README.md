@@ -26,7 +26,9 @@ cannot drift apart.
 The proposed names are regenerated at every keystroke, from the first character typed.
 Whichever of the name and the number has not been filled in yet is left out of them, so
 typing just `Spaceways` shows `Spaceways p01.jpg` and the number slots itself in as it is
-typed.  Renaming still needs both.
+typed.  With neither filled in there is only the page numbering to show, and it appears as
+`p 01.jpg`, `p 02.jpg`... -- spaced out to look like the placeholder it is.  Renaming still
+needs both.
 
 The order in which the files are supplied is the order in which they are numbered.  If that
 order is not alphabetical, ScanRenamer says so and offers a choice of sorting them

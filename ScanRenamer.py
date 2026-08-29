@@ -22,7 +22,9 @@ The batch is shown two columns wide -- each file on the left and the name it
 would be renamed to on the right, the two being columns of one list so that they
 cannot scroll apart.  The proposed names follow the name and number keystroke by
 keystroke, from the first character typed; whichever of the two has not been
-filled in yet is simply left out of them.
+filled in yet is simply left out of them.  With neither filled in there is only
+the page numbering to show, and it is spaced out as "p 01.jpg" to look like the
+placeholder it is.
 
 The order in which they are supplied is the order in which they are numbered; if
 that order is not alphabetical the user is warned and gets to choose between
@@ -350,7 +352,14 @@ class ScanRenamerFrame(wx.Frame):
     def ProposedNames(self) -> list[str]:
         title=self.tTitle.GetValue().strip()
         number=self.tNumber.GetValue().strip()
-        return [os.path.basename(new) for _, new in BuildNewNames(self.Files, title, number)]
+        names=[os.path.basename(new) for _, new in BuildNewNames(self.Files, title, number)]
+
+        # With nothing typed at all there is only the page numbering to show, and it is
+        # spaced out as "p 01.jpg" to look like the placeholder it is.  The moment anything
+        # is typed the space goes and the names are the real ones.
+        if len(title) == 0 and len(number) == 0:
+            names=[f"p {n[1:]}" for n in names]
+        return names
 
 
     # Show the proposed names in the right-hand column.
