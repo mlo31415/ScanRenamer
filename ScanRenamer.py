@@ -14,7 +14,7 @@ twelve, 001...150 for a hundred and fifty.  Each file keeps its own extension.
 
 Files are supplied in any of three ways:
 
-    * dropped on the window
+    * dropped on the window (a dropped folder stands for the files in it)
     * chosen with the Select Files... button
     * picked up from a watched folder
 
@@ -28,8 +28,10 @@ placeholder it is.
 
 The order in which they are supplied is the order in which they are numbered; if
 that order is not alphabetical the user is warned and gets to choose between
-sorting them and keeping them as they came.  (Files from the watched folder are
-always in alphabetical order, so the question never arises for them.)
+sorting them and keeping them as they came.  Files from the watched folder are
+not asked about: they come in the order the scanner made them, which is by the
+number in their names read as a number rather than as text, so that an unpadded
+"{prefix}_10.jpg" follows "{prefix}_9.jpg" instead of coming between _1 and _2.
 
 The folder to watch and the prefix the scanner names its files with come from the
 "Watch Folder=" and "Scan Prefix=" lines of "ScanRenamer settings.txt" in the
@@ -55,7 +57,15 @@ Every batch is written to "ScanRenamer state.json" alongside this program as a
 table of old-name/new-name pairs, and Undo Last Rename puts the most recent batch
 back the way it was -- including the number it was renamed with, which goes back
 into the dialog so that the batch can be done again with whatever needed
-correcting.
+correcting.  The file is written by making a new one and putting it in the old
+one's place, so that stopping half way through cannot destroy the table; and a
+state file which cannot be read is put aside under its own name rather than
+being written over.
+
+A rename which is interrupted part way -- the program killed, the machine losing
+power -- leaves the files it had already moved under temporary names ending in
+".ScanRenamerTmp".  These are looked for in the watched folder at startup and
+offered back under their own names.
 """
 
 import json
@@ -76,6 +86,11 @@ IllegalCharacters='\\/:*?"<>|'
 
 # The extensions the scanner writes.
 ScanExtensions=r"\.jpe?g"
+
+# What pass 1 of a rename tacks onto a name to move a file out of its own way.  A file is
+# under one of these names only while a batch is being renamed -- unless the program is
+# stopped in the middle of one, and then they are left behind for LeftoverTempFiles to find.
+TempSuffix=".ScanRenamerTmp"
 
 # How often the watched folder is looked at, in milliseconds.
 WatchInterval=1000
@@ -124,13 +139,27 @@ def StateFilePath() -> str:
     return os.path.join(ProgramDirectory(), StateFileName)
 
 
-# Read the saved state.  A missing or damaged state file is not an error: we just start clean.
+# Read the saved state.  Not having one yet is perfectly normal and we just start clean.
+# A damaged one is another matter: it holds the table of renames done, which is the only
+# record of what was renamed to what, so it is put aside under its own name rather than
+# being written over, and the user is told.
 def ReadState() -> dict:
+    empty={"Title": "", "Batches": []}
     try:
         with open(StateFilePath(), "r", encoding="utf-8") as f:
             state=json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return {"Title": "", "Batches": []}
+    except OSError:
+        return empty
+    except json.JSONDecodeError as e:
+        aside=os.path.join(ProgramDirectory(), f"ScanRenamer state (damaged {datetime.now():%Y-%m-%d %H%M%S}).json")
+        try:
+            os.replace(StateFilePath(), aside)
+            saved=f"\n\nIt has been put aside as '{os.path.basename(aside)}' in case the renames it lists are wanted."
+        except OSError:
+            saved=""
+        wx.MessageBox(f"'{StateFileName}' cannot be read ({e}), so Undo Last Rename has nothing to work "
+                      f"from until a new batch is renamed.{saved}", "ScanRenamer", wx.OK|wx.ICON_ERROR)
+        return empty
 
     if "Title" not in state:
         state["Title"]=""
@@ -139,10 +168,17 @@ def ReadState() -> dict:
     return state
 
 
+# Save the state, by writing a new file and putting it in the old one's place.  Writing over
+# the old one would leave nothing but wreckage if the program stopped half way through, and
+# the table of renames done would go with it.
 def WriteState(state: dict) -> None:
+    partial=StateFilePath()+".partial"
     try:
-        with open(StateFilePath(), "w", encoding="utf-8") as f:
+        with open(partial, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(partial, StateFilePath())
     except OSError as e:
         wx.MessageBox(f"Unable to save {StateFileName}:\n{e}", "ScanRenamer", wx.OK|wx.ICON_ERROR)
 
@@ -156,11 +192,11 @@ def RenameFiles(pairs: list[tuple[str, str]]) -> str:
     # Pass 1: move every file out of the way to a temporary name.
     temps: list[str]=[]
     for old, _ in pairs:
-        tmp=old+".ScanRenamerTmp"
+        tmp=old+TempSuffix
         i=0
         while os.path.exists(tmp):
             i+=1
-            tmp=f"{old}.ScanRenamerTmp{i}"
+            tmp=f"{old}{TempSuffix}{i}"
         try:
             os.rename(old, tmp)
         except OSError as e:
@@ -235,6 +271,23 @@ def PutBack(pairs: list[tuple[str, str]]) -> None:
             pass
 
 
+# Files left under the temporary names of pass 1 by a rename which never finished, paired
+# with the names they should go back to.  Only the watched folder is looked in, that being
+# where a batch is renamed in the ordinary way of things.
+def LeftoverTempFiles(folder: str) -> list[tuple[str, str]]:
+    try:
+        names=os.listdir(folder)
+    except OSError:
+        return []
+
+    leftovers: list[tuple[str, str]]=[]
+    for name in sorted(names):
+        stripped=re.sub(re.escape(TempSuffix)+r"\d*$", "", name)
+        if stripped != name and os.path.isfile(os.path.join(folder, name)):
+            leftovers.append((os.path.join(folder, name), os.path.join(folder, stripped)))
+    return leftovers
+
+
 # Is this file name scanner output: the scanner's own prefix, optionally followed by an
 # underscore and digits, with a scan extension?  With no prefix supplied, nothing is.
 def IsScannerFileName(name: str, prefix: str) -> bool:
@@ -243,15 +296,27 @@ def IsScannerFileName(name: str, prefix: str) -> bool:
     return re.fullmatch(re.escape(prefix)+r"(_\d+)?"+ScanExtensions, name, re.IGNORECASE) is not None
 
 
-# Everything in the watched folder which is scanner output, in alphabetical order.
+# The number in a scanner file's name, as a number: "z-_012.jpg" is 12.  The file with no
+# number at all -- "z-.jpg", which the scanner writes for the first page -- comes before all
+# of them.
+# Sorting on this rather than on the name matters when the scanner does not pad its numbers:
+# by name, z-_10.jpg falls between z-_1.jpg and z-_2.jpg, and the pages would be numbered in
+# that order without a word of warning.
+def ScanNumber(name: str, prefix: str) -> int:
+    digits=os.path.splitext(name)[0][len(prefix):].lstrip("_")
+    return int(digits) if digits.isdigit() else -1
+
+
+# Everything in the watched folder which is scanner output, in the order the scanner made it.
 def ScannerFilesIn(folder: str, prefix: str) -> list[str]:
     try:
         names=os.listdir(folder)
     except OSError:
         return []       # The folder has gone away or is unreadable: nothing to pick up
 
-    paths=[os.path.join(folder, n) for n in names if IsScannerFileName(n, prefix)]
-    return Alphabetize([p for p in paths if os.path.isfile(p)])
+    names=[n for n in names if IsScannerFileName(n, prefix) and os.path.isfile(os.path.join(folder, n))]
+    names.sort(key=lambda n: (ScanNumber(n, prefix), os.path.normcase(n)))
+    return [os.path.join(folder, n) for n in names]
 
 
 # Is this list of paths in alphabetical order?
@@ -281,6 +346,23 @@ def BuildNewNames(paths: list[str], title: str, number: str) -> list[tuple[str, 
     return pairs
 
 
+# What was supplied by hand comes to this first: a dropped folder stands for the files
+# directly inside it, in alphabetical order, and anything which is neither a file nor a
+# folder is passed over.
+def ExpandSupplied(paths: list[str]) -> list[str]:
+    files: list[str]=[]
+    for path in paths:
+        if os.path.isdir(path):
+            try:
+                inside=[os.path.join(path, n) for n in os.listdir(path)]
+            except OSError:
+                continue
+            files.extend(Alphabetize([p for p in inside if os.path.isfile(p)]))
+        elif os.path.isfile(path):
+            files.append(path)
+    return files
+
+
 # Accepts files dropped on the window and hands them to the frame.
 class ScanRenamerDropTarget(wx.FileDropTarget):
     def __init__(self, frame: "ScanRenamerFrame") -> None:
@@ -288,7 +370,7 @@ class ScanRenamerDropTarget(wx.FileDropTarget):
         self.Frame=frame
 
     def OnDropFiles(self, x, y, filenames) -> bool:
-        self.Frame.SetFiles(list(filenames))
+        self.Frame.SetSuppliedFiles(list(filenames))
         return True
 
 
@@ -377,6 +459,43 @@ class ScanRenamerFrame(wx.Frame):
         self.UpdateControls()
         self.Centre()
 
+        # Ask about anything a half-done rename left behind, once the window is up to ask in
+        # front of.
+        if len(self.WatchFolder) > 0:
+            wx.CallAfter(self.CheckForLeftovers)
+
+
+    # A rename which was interrupted -- the program killed, the machine losing power -- leaves
+    # the files it had moved out of the way under temporary names.  Nothing else will ever
+    # pick them up, and the folder looks empty of scans, so they are offered back at startup.
+    def CheckForLeftovers(self) -> None:
+        leftovers=LeftoverTempFiles(self.WatchFolder)
+        if len(leftovers) == 0:
+            return
+
+        names="\n".join("    "+os.path.basename(new) for _, new in leftovers[:6])
+        if len(leftovers) > 6:
+            names+=f"\n    ...and {len(leftovers)-6} more"
+        answer=wx.MessageBox(f"{len(leftovers)} files in {self.WatchFolder} were left behind by a rename "
+                             f"which did not finish.\n\nPut them back under their own names?\n\n{names}",
+                             "ScanRenamer", wx.YES_NO|wx.ICON_QUESTION)
+        if answer != wx.YES:
+            return
+
+        report=ConflictReport(leftovers)
+        if report != "":
+            wx.MessageBox(f"Putting them back would overwrite a file:\n\n{report}\n\nNothing was put back.",
+                          "ScanRenamer", wx.OK|wx.ICON_ERROR)
+            return
+
+        msg=RenameFiles(leftovers)
+        if msg != "":
+            wx.MessageBox(msg, "ScanRenamer", wx.OK|wx.ICON_ERROR)
+            return
+
+        self.stStatus.SetLabel(f"Put back {len(leftovers)} files left over from an unfinished rename.")
+        self.OnTimer(None)      # They may well be scans the watcher wants
+
 
     # Watching needs both a folder to watch and the prefix to watch for.
     def Watching(self) -> bool:
@@ -391,6 +510,16 @@ class ScanRenamerFrame(wx.Frame):
         if not os.path.isdir(self.WatchFolder):
             return f"Watch Folder '{self.WatchFolder}' does not exist."
         return f"Watching {self.WatchFolder} for {self.ScanPrefix}*.jpg"
+
+
+    # Files supplied by hand, dropped or chosen.  A batch which comes to nothing -- an empty
+    # folder dropped, say -- is said so rather than silently doing nothing at all.
+    def SetSuppliedFiles(self, paths: list[str]) -> None:
+        files=ExpandSupplied(paths)
+        if len(files) == 0:
+            wx.MessageBox("There are no files there to rename.", "ScanRenamer", wx.OK|wx.ICON_INFORMATION)
+            return
+        self.SetFiles(files)
 
 
     # The files supplied for this batch, in the order in which they were supplied.
@@ -497,7 +626,7 @@ class ScanRenamerFrame(wx.Frame):
                            style=wx.FD_OPEN|wx.FD_MULTIPLE|wx.FD_FILE_MUST_EXIST) as dlg:
             if dlg.ShowModal() == wx.ID_CANCEL:
                 return
-            self.SetFiles(dlg.GetPaths())
+            self.SetSuppliedFiles(dlg.GetPaths())
 
 
     def OnRename(self, event) -> None:
@@ -520,8 +649,11 @@ class ScanRenamerFrame(wx.Frame):
 
         # The files are numbered in the order in which they were supplied.  If that is not
         # alphabetical order, the user needs to know about it and to say what to do.
+        # Files from the watcher are not asked about: they are already in the order the
+        # scanner made them, which is the order wanted, and with an unpadded numbering that
+        # is deliberately not alphabetical order.
         files=self.Files
-        if not IsAlphabetical(files):
+        if not self.FilesFromWatcher and not IsAlphabetical(files):
             dlg=wx.MessageDialog(self, "These files are not in alphabetical order.\n\n"
                                        "Sort alphabetically:  sort them and number them in that order.\n"
                                        "Keep as supplied:  number them in the order they were supplied.",

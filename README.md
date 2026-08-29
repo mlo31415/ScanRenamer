@@ -17,7 +17,9 @@ Each file keeps its own extension.
 ## Using it
 
 Supply the files in any of three ways: drop them on the window, choose them with **Select
-Files...**, or let ScanRenamer pick them up from a watched folder (below).
+Files...**, or let ScanRenamer pick them up from a watched folder (below).  A dropped folder
+stands for the files directly inside it, in alphabetical order; dropping something with no
+files in it says so rather than appearing to do nothing.
 
 The batch is shown two columns wide: each file on the left, and on the right the name it
 would be renamed to.  They are the two columns of a single list, so they scroll as one and
@@ -34,6 +36,12 @@ The order in which the files are supplied is the order in which they are numbere
 order is not alphabetical, ScanRenamer says so and offers a choice of sorting them
 alphabetically, numbering them as supplied, or cancelling.  Choosing to sort renumbers them,
 so the names actually given are not the ones the right-hand column was showing.
+
+Files from the watched folder are not asked about.  They arrive in the order the scanner made
+them: sorted by the number in the name read *as a number*, with the unnumbered first page
+ahead of them all.  That matters if the scanner is ever set to number without padding, where
+sorting by name would put `z-_10.jpg` between `z-_1.jpg` and `z-_2.jpg` and silently number
+the pages in that order.
 
 Type the name and the number and press **Rename**.  The name is kept for the next batch (and
 for the next run of the program); the number is blanked, since it is always different.
@@ -100,6 +108,21 @@ Because renaming blanks the number, undoing a rename puts that batch's number (a
 if the box has since been emptied) back into the dialog, so the batch can be done again with
 whatever needed correcting.  A number typed since the rename is left alone -- undo fills the
 boxes in, it never overwrites them.
+
+The file is saved by writing a new one and putting it in the old one's place, so that being
+stopped half way through cannot leave a wrecked file where the table of renames used to be.
+A state file which cannot be read is renamed to `ScanRenamer state (damaged ...).json` and
+reported, rather than being quietly written over -- it is the only record of what was renamed
+to what, and an undo can be done by hand from it.
+
+## If a rename is interrupted
+
+Renaming moves every file of a batch to a temporary name ending in `.ScanRenamerTmp` before
+giving it its real one.  If the program is killed, or the machine loses power, between those
+two steps, the files are left under those temporary names -- invisible to the watcher and to
+everything else.  ScanRenamer looks for them in the watched folder when it starts and offers
+to put them back under their own names; it will not put one back over the top of a file which
+has since taken its name.
 
 ## Running it
 
