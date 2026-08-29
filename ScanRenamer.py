@@ -67,7 +67,9 @@ would end up with the same name, or the same file supplied twice.  The same
 looking-over is done before undoing a rename, where a scan made since may have
 taken one of the names the batch is going back to.
 
-Rename, the button the work is done with, is picked out in light yellow.  Exit
+Rename, the button the work is done with, is picked out in light yellow, and
+Enter in the number box does the same as pressing it (and nothing at all when
+the button itself would do nothing).  Exit
 asks first if the batch still holds files which have not been renamed, as does
 the window's own close box.
 
@@ -484,7 +486,7 @@ class ScanRenamerFrame(wx.Frame):
         self.tTitle=wx.TextCtrl(panel, value=self.State["Title"])
         grid.Add(self.tTitle, 1, wx.EXPAND)
         grid.Add(wx.StaticText(panel, label="Number:"), 0, wx.ALIGN_CENTER_VERTICAL)
-        self.tNumber=wx.TextCtrl(panel)
+        self.tNumber=wx.TextCtrl(panel, style=wx.TE_PROCESS_ENTER)      # Enter in it renames
         grid.Add(self.tNumber, 1, wx.EXPAND)
         sizer.Add(grid, 0, wx.EXPAND|wx.ALL, 5)
 
@@ -518,6 +520,7 @@ class ScanRenamerFrame(wx.Frame):
         self.lcFiles.Bind(wx.EVT_LIST_ITEM_DESELECTED, self.OnSelectionChanged)
         self.tTitle.Bind(wx.EVT_TEXT, self.OnNameOrNumberChanged)
         self.tNumber.Bind(wx.EVT_TEXT, self.OnNameOrNumberChanged)
+        self.tNumber.Bind(wx.EVT_TEXT_ENTER, self.OnNumberEntered)
         self.bSelect.Bind(wx.EVT_BUTTON, self.OnSelect)
         self.bRename.Bind(wx.EVT_BUTTON, self.OnRename)
         self.bUndo.Bind(wx.EVT_BUTTON, self.OnUndo)
@@ -703,6 +706,14 @@ class ScanRenamerFrame(wx.Frame):
 
     def OnNameOrNumberChanged(self, event) -> None:
         self.UpdateProposedNames()
+
+
+    # Enter in the number box is the Rename button: the number is the last thing typed before
+    # a batch is renamed, and the cursor is put back there when one is done.  It does nothing
+    # when the button itself would do nothing -- an empty number, or no files to rename.
+    def OnNumberEntered(self, event) -> None:
+        if len(self.tNumber.GetValue().strip()) > 0 and self.bRename.IsEnabled():
+            self.OnRename(event)
 
 
     # Picking rows out changes which files would be renamed, and so what the right-hand
