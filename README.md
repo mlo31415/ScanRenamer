@@ -56,8 +56,10 @@ It matters most when a scanner numbers without padding: sorting as plain text wo
 
 Files from the watched folder are never asked about, being in this order already.
 
-Type the name and the number and press **Rename**.  The name is kept for the next batch (and
-for the next run of the program); the number is blanked, since it is always different.
+Type the name and the number and press **Rename**, which is picked out in light yellow as the
+button the work is done with.  The name is kept for the next batch (and for the next run of
+the program); the number is blanked, since it is always different, and the cursor is put in
+the Number box ready to type the next one.
 
 **Undo Last Rename** puts the most recent batch back the way it was.  **Exit** closes the
 program.

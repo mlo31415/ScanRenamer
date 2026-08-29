@@ -56,8 +56,11 @@ would end up with the same name, or the same file supplied twice.  The same
 looking-over is done before undoing a rename, where a scan made since may have
 taken one of the names the batch is going back to.
 
+Rename, the button the work is done with, is picked out in light yellow.
+
 The title string is remembered from batch to batch (and from run to run); the
-number is cleared after each successful batch, since it always changes.
+number is cleared after each successful batch, since it always changes, and the
+cursor is put in the number box ready for the next one.
 
 Every batch is written to "ScanRenamer state.json" alongside this program as a
 table of old-name/new-name pairs, and Undo Last Rename puts the most recent batch
@@ -107,6 +110,12 @@ WatchInterval=1000
 # is how far back a rename can be undone; the older ones are only so much weight in the file,
 # which is read and written whole every time a batch is renamed.
 MaxBatchesKept=50
+
+# The light yellow the Rename button is picked out in, and the ink to write on it with.  The
+# ink is set as well as the paper: on a machine running in dark colours the button's own text
+# would be a pale one, and all but invisible on yellow.
+HighlightColour=(255, 250, 190)
+HighlightTextColour=(0, 0, 0)
 
 # The gap between the two columns of the display, in 96-to-the-inch units: about a third of
 # an inch.  It is turned into real pixels with FromDIP(), so it stays a third of an inch on
@@ -454,6 +463,8 @@ class ScanRenamerFrame(wx.Frame):
 
         buttons=wx.BoxSizer(wx.HORIZONTAL)
         self.bRename=wx.Button(panel, label="Rename")
+        self.bRename.SetBackgroundColour(wx.Colour(*HighlightColour))    # The button the work is done with
+        self.bRename.SetForegroundColour(wx.Colour(*HighlightTextColour))
         buttons.Add(self.bRename, 0, wx.ALL, 5)
         self.bUndo=wx.Button(panel, label="Undo Last Rename")
         buttons.Add(self.bUndo, 0, wx.ALL, 5)
@@ -732,6 +743,10 @@ class ScanRenamerFrame(wx.Frame):
         self.tNumber.SetValue("")
         self.SetFiles([])
         self.stStatus.SetLabel(f"Renamed {len(pairs)} files.")
+
+        # The number is the next thing wanted -- the name stays as it is, and the batch after
+        # this one is the same publication's next issue -- so the cursor is put there ready.
+        self.tNumber.SetFocus()
 
 
     def OnUndo(self, event) -> None:
