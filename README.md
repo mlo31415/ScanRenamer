@@ -18,7 +18,7 @@ Each file keeps its own extension.
 
 Supply the files in any of three ways: drop them on the window, choose them with **Select
 Files...**, or let ScanRenamer pick them up from a watched folder (below).  A dropped folder
-stands for the files directly inside it, in alphabetical order; dropping something with no
+stands for the files directly inside it, in name order; dropping something with no
 files in it says so rather than appearing to do nothing.
 
 The batch is shown two columns wide: each file on the left, and on the right the name it
@@ -33,15 +33,28 @@ typed.  With neither filled in there is only the page numbering to show, and it 
 needs both.
 
 The order in which the files are supplied is the order in which they are numbered.  If that
-order is not alphabetical, ScanRenamer says so and offers a choice of sorting them
-alphabetically, numbering them as supplied, or cancelling.  Choosing to sort renumbers them,
-so the names actually given are not the ones the right-hand column was showing.
+order is not name order, ScanRenamer says so and offers a choice of sorting them by name,
+numbering them as supplied, or cancelling.  Choosing to sort renumbers them, so the names
+actually given are not the ones the right-hand column was showing.
 
-Files from the watched folder are not asked about.  They arrive in the order the scanner made
-them: sorted by the number in the name read *as a number*, with the unnumbered first page
-ahead of them all.  That matters if the scanner is ever set to number without padding, where
-sorting by name would put `z-_10.jpg` between `z-_1.jpg` and `z-_2.jpg` and silently number
-the pages in that order.
+### Name order
+
+Names are compared as text **except for a number at the end of the name, which is compared as
+a number**:
+
+    page1.jpg  page9.jpg  page10.jpg          and not  page1.jpg  page10.jpg  page9.jpg
+
+A name with no number at the end comes before the numbered ones sharing its text, which puts
+the scanner's own first page (`z-.jpg`) ahead of `z-_1.jpg`.  Only the last run of digits
+counts, so `a2b.jpg`, `a2b3.jpg`, `a2b10.jpg`; digits anywhere else are just text.  Case is
+ignored, as Windows ignores it, and files in different folders are grouped by folder.
+
+The same rule is used everywhere -- for a dropped folder, for **Sort by name**, and for the
+watched folder -- so dropping a folder of scans gives exactly the order watching it would.
+It matters most when a scanner numbers without padding: sorting as plain text would put
+`z-_10.jpg` between `z-_1.jpg` and `z-_2.jpg` and silently number the pages that way.
+
+Files from the watched folder are never asked about, being in this order already.
 
 Type the name and the number and press **Rename**.  The name is kept for the next batch (and
 for the next run of the program); the number is blanked, since it is always different.
@@ -85,7 +98,7 @@ window says so.
 
 So long as nothing has been supplied by hand, every file in that folder named `{prefix}.jpg`
 or `{prefix}_nnn.jpg` (`.jpeg` counts too, and case is ignored) is loaded into the batch in
-alphabetical order, and pages go on being added to the list as they are scanned, up until
+name order, and pages go on being added to the list as they are scanned, up until
 **Rename** is pressed.  With the settings above that means `z-.jpg`, `z-_001.jpg`,
 `z-_002.jpg`... and nothing else in the folder.  Files supplied by hand take the batch over;
 the watcher leaves them alone until the batch is empty again.

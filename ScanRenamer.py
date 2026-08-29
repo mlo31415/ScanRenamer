@@ -27,18 +27,23 @@ the page numbering to show, and it is spaced out as "p 01.jpg" to look like the
 placeholder it is.
 
 The order in which they are supplied is the order in which they are numbered; if
-that order is not alphabetical the user is warned and gets to choose between
-sorting them and keeping them as they came.  Files from the watched folder are
-not asked about: they come in the order the scanner made them, which is by the
-number in their names read as a number rather than as text, so that an unpadded
-"{prefix}_10.jpg" follows "{prefix}_9.jpg" instead of coming between _1 and _2.
+that order is not name order the user is warned and gets to choose between
+sorting them and keeping them as they came.
+
+Name order compares names as text except for a number at the end of the name,
+which is compared as a number: "page9" comes before "page10" instead of after
+it, and a scanner numbering its pages without padding is put in the order it
+made them.  A name with no number at the end comes before the numbered ones
+sharing its text, which is where the scanner's own first page ("z-.jpg" before
+"z-_1.jpg") belongs.  Files from the watched folder are in this order already
+and are never asked about.
 
 The folder to watch and the prefix the scanner names its files with come from the
 "Watch Folder=" and "Scan Prefix=" lines of "ScanRenamer settings.txt" in the
 program's directory, which is read when the program starts; watching needs both
 of them.  While no files have been supplied by hand, every file in that folder
 named "{prefix}.jpg" or "{prefix}_nnn.jpg" (.jpeg counts too) is loaded into the
-batch in alphabetical order, and the list is kept up to date as more pages are
+batch in name order, and the list is kept up to date as more pages are
 scanned, until Rename is pressed.  A rename which would produce a name that
 looks like scanner output is refused, so that the watcher can never pick a
 renamed file back up.
@@ -296,17 +301,6 @@ def IsScannerFileName(name: str, prefix: str) -> bool:
     return re.fullmatch(re.escape(prefix)+r"(_\d+)?"+ScanExtensions, name, re.IGNORECASE) is not None
 
 
-# The number in a scanner file's name, as a number: "z-_012.jpg" is 12.  The file with no
-# number at all -- "z-.jpg", which the scanner writes for the first page -- comes before all
-# of them.
-# Sorting on this rather than on the name matters when the scanner does not pad its numbers:
-# by name, z-_10.jpg falls between z-_1.jpg and z-_2.jpg, and the pages would be numbered in
-# that order without a word of warning.
-def ScanNumber(name: str, prefix: str) -> int:
-    digits=os.path.splitext(name)[0][len(prefix):].lstrip("_")
-    return int(digits) if digits.isdigit() else -1
-
-
 # Everything in the watched folder which is scanner output, in the order the scanner made it.
 def ScannerFilesIn(folder: str, prefix: str) -> list[str]:
     try:
@@ -314,19 +308,34 @@ def ScannerFilesIn(folder: str, prefix: str) -> list[str]:
     except OSError:
         return []       # The folder has gone away or is unreadable: nothing to pick up
 
-    names=[n for n in names if IsScannerFileName(n, prefix) and os.path.isfile(os.path.join(folder, n))]
-    names.sort(key=lambda n: (ScanNumber(n, prefix), os.path.normcase(n)))
-    return [os.path.join(folder, n) for n in names]
+    paths=[os.path.join(folder, n) for n in names if IsScannerFileName(n, prefix)]
+    return SortByName([p for p in paths if os.path.isfile(p)])
 
 
-# Is this list of paths in alphabetical order?
-def IsAlphabetical(paths: list[str]) -> bool:
-    keys=[os.path.normcase(p) for p in paths]
+# What a file name is sorted on: everything but a numeric suffix compared as text, and the
+# numeric suffix compared as a number.  So "page10" follows "page9" instead of falling
+# between "page1" and "page2", which is how a scanner numbering without padding writes its
+# pages, and how anything else counting in its file names does too.
+# A name with no numeric suffix comes before the numbered ones sharing its text -- "z-.jpg",
+# the scanner's own name for a first page, ahead of "z-_1.jpg" and the rest.
+# Files in different folders are grouped by folder first.
+def NameKey(path: str) -> tuple:
+    folder, name=os.path.split(path)
+    stem, ext=os.path.splitext(name)
+    digits=re.search(r"\d+$", stem)
+    text=stem[:digits.start()] if digits else stem
+    return (os.path.normcase(folder), os.path.normcase(text),
+            int(digits.group()) if digits else -1, os.path.normcase(ext))
+
+
+def SortByName(paths: list[str]) -> list[str]:
+    return sorted(paths, key=NameKey)
+
+
+# Is this list of paths in that order already?
+def IsInNameOrder(paths: list[str]) -> bool:
+    keys=[NameKey(p) for p in paths]
     return keys == sorted(keys)
-
-
-def Alphabetize(paths: list[str]) -> list[str]:
-    return sorted(paths, key=os.path.normcase)
 
 
 # Turn a list of paths into a list of (old, new) pairs.  The sequence number gets just as
@@ -347,8 +356,8 @@ def BuildNewNames(paths: list[str], title: str, number: str) -> list[tuple[str, 
 
 
 # What was supplied by hand comes to this first: a dropped folder stands for the files
-# directly inside it, in alphabetical order, and anything which is neither a file nor a
-# folder is passed over.
+# directly inside it, in name order, and anything which is neither a file nor a folder is
+# passed over.
 def ExpandSupplied(paths: list[str]) -> list[str]:
     files: list[str]=[]
     for path in paths:
@@ -357,7 +366,7 @@ def ExpandSupplied(paths: list[str]) -> list[str]:
                 inside=[os.path.join(path, n) for n in os.listdir(path)]
             except OSError:
                 continue
-            files.extend(Alphabetize([p for p in inside if os.path.isfile(p)]))
+            files.extend(SortByName([p for p in inside if os.path.isfile(p)]))
         elif os.path.isfile(path):
             files.append(path)
     return files
@@ -648,23 +657,24 @@ class ScanRenamerFrame(wx.Frame):
             return
 
         # The files are numbered in the order in which they were supplied.  If that is not
-        # alphabetical order, the user needs to know about it and to say what to do.
+        # name order, the user needs to know about it and to say what to do.
         # Files from the watcher are not asked about: they are already in the order the
-        # scanner made them, which is the order wanted, and with an unpadded numbering that
-        # is deliberately not alphabetical order.
+        # scanner made them, which is name order and is the order wanted.
         files=self.Files
-        if not self.FilesFromWatcher and not IsAlphabetical(files):
-            dlg=wx.MessageDialog(self, "These files are not in alphabetical order.\n\n"
-                                       "Sort alphabetically:  sort them and number them in that order.\n"
+        if not self.FilesFromWatcher and not IsInNameOrder(files):
+            dlg=wx.MessageDialog(self, "These files are not in name order.\n\n"
+                                       "Sort by name:  sort them and number them in that order.  Names are "
+                                       "compared as text except for a number at the end, which is compared "
+                                       "as a number, so page10 follows page9.\n"
                                        "Keep as supplied:  number them in the order they were supplied.",
                                  "ScanRenamer", wx.YES_NO|wx.CANCEL|wx.ICON_QUESTION)
-            dlg.SetYesNoCancelLabels("Sort alphabetically", "Keep as supplied", "Cancel")
+            dlg.SetYesNoCancelLabels("Sort by name", "Keep as supplied", "Cancel")
             answer=dlg.ShowModal()
             dlg.Destroy()
             if answer == wx.ID_CANCEL:
                 return
             if answer == wx.ID_YES:
-                files=Alphabetize(files)
+                files=SortByName(files)
 
         pairs=BuildNewNames(files, title, number)
 
