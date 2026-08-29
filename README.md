@@ -20,8 +20,13 @@ Supply the files in any of three ways: drop them on the window, choose them with
 Files...**, or let ScanRenamer pick them up from a watched folder (below).
 
 The batch is shown two columns wide: each file on the left, and on the right the name it
-would be renamed to, which follows the name and number as they are typed.  They are the two
-columns of a single list, so they scroll as one and cannot drift apart.
+would be renamed to.  They are the two columns of a single list, so they scroll as one and
+cannot drift apart.
+
+The proposed names are regenerated at every keystroke, from the first character typed.
+Whichever of the name and the number has not been filled in yet is left out of them, so
+typing just `Spaceways` shows `Spaceways p01.jpg` and the number slots itself in as it is
+typed.  Renaming still needs both.
 
 The order in which the files are supplied is the order in which they are numbered.  If that
 order is not alphabetical, ScanRenamer says so and offers a choice of sorting them

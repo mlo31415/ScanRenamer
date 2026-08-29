@@ -20,8 +20,9 @@ Files are supplied in any of three ways:
 
 The batch is shown two columns wide -- each file on the left and the name it
 would be renamed to on the right, the two being columns of one list so that they
-cannot scroll apart.  The proposed names follow the name and number as they are
-typed.
+cannot scroll apart.  The proposed names follow the name and number keystroke by
+keystroke, from the first character typed; whichever of the two has not been
+filled in yet is simply left out of them.
 
 The order in which they are supplied is the order in which they are numbered; if
 that order is not alphabetical the user is warned and gets to choose between
@@ -206,12 +207,17 @@ def Alphabetize(paths: list[str]) -> list[str]:
 
 # Turn a list of paths into a list of (old, new) pairs.  The sequence number gets just as
 # many digits as the batch needs and each file keeps its own extension.
+# A name and a number which is not there yet is simply left out, so that a half-typed name
+# can be shown as it is built up.  (Renaming needs both of them, so nothing can actually be
+# renamed to one of these partial names.)
 def BuildNewNames(paths: list[str], title: str, number: str) -> list[tuple[str, str]]:
     width=len(str(len(paths)))
+    supplied=[s for s in (title, number) if len(s) > 0]
     pairs: list[tuple[str, str]]=[]
     for i, old in enumerate(paths):
         _, ext=os.path.splitext(old)
-        new=os.path.join(os.path.dirname(old), f"{title} {number} p{i+1:0{width}d}{ext}")
+        stem=" ".join(supplied+[f"p{i+1:0{width}d}"])
+        new=os.path.join(os.path.dirname(old), stem+ext)
         pairs.append((old, new))
     return pairs
 
@@ -339,13 +345,11 @@ class ScanRenamerFrame(wx.Frame):
         self.UpdateControls()
 
 
-    # The names the files would be renamed to, as things stand.  While the name and number
-    # are not both filled in there is nothing to propose.
+    # The names the files would be renamed to, as things stand -- which is shown from the
+    # first character typed, with whatever part of the name has been supplied so far.
     def ProposedNames(self) -> list[str]:
         title=self.tTitle.GetValue().strip()
         number=self.tNumber.GetValue().strip()
-        if len(title) == 0 or len(number) == 0:
-            return [""]*len(self.Files)
         return [os.path.basename(new) for _, new in BuildNewNames(self.Files, title, number)]
 
 
