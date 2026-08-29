@@ -28,7 +28,10 @@ placeholder it is.
 
 The order in which they are supplied is the order in which they are numbered; if
 that order is not name order the user is warned and gets to choose between
-sorting them and keeping them as they came.
+sorting them and keeping them as they came.  Sorting renumbers them, so it does
+not rename there and then: the batch is put in order and left to be looked at,
+with the right-hand column now showing what each file would become, and a second
+press of Rename does it.
 
 Name order compares names as text except for a number at the end of the name,
 which is compared as a number: "page9" comes before "page10" instead of after
@@ -401,6 +404,24 @@ def ExpandSupplied(paths: list[str]) -> list[str]:
     return files
 
 
+# Holds the watcher still while a batch is being renamed or put back.  wx goes on delivering
+# timer ticks while a dialog is up, so without this a page arriving mid-question could reload
+# the batch under the work: the files renamed would be the ones the work started with, and
+# the display would be showing another set entirely.
+class WatchingPaused:
+    def __init__(self, frame: "ScanRenamerFrame") -> None:
+        self.Frame=frame
+        self.WasRunning=False
+
+    def __enter__(self) -> None:
+        self.WasRunning=self.Frame.Timer.IsRunning()
+        self.Frame.Timer.Stop()
+
+    def __exit__(self, exc_type, exc_value, exc_traceback) -> None:
+        if self.WasRunning:
+            self.Frame.Timer.Start(WatchInterval)
+
+
 # Accepts files dropped on the window and hands them to the frame.
 class ScanRenamerDropTarget(wx.FileDropTarget):
     def __init__(self, frame: "ScanRenamerFrame") -> None:
@@ -509,6 +530,11 @@ class ScanRenamerFrame(wx.Frame):
     # the files it had moved out of the way under temporary names.  Nothing else will ever
     # pick them up, and the folder looks empty of scans, so they are offered back at startup.
     def CheckForLeftovers(self) -> None:
+        with WatchingPaused(self):
+            self.PutBackLeftovers()
+
+
+    def PutBackLeftovers(self) -> None:
         leftovers=LeftoverTempFiles(self.WatchFolder)
         if len(leftovers) == 0:
             return
@@ -571,6 +597,7 @@ class ScanRenamerFrame(wx.Frame):
         for i, path in enumerate(self.Files):
             self.lcFiles.InsertItem(i, os.path.basename(path))
         self.UpdateProposedNames()
+        self.SizeColumns()      # A new batch: both columns hold something different now
 
         self.stStatus.SetLabel("")
         self.UpdateControls()
@@ -593,9 +620,18 @@ class ScanRenamerFrame(wx.Frame):
 
     # Show the proposed names in the right-hand column.
     def UpdateProposedNames(self) -> None:
-        for i, new in enumerate(self.ProposedNames()):
+        names=self.ProposedNames()
+        for i, new in enumerate(names):
             self.lcFiles.SetItem(i, 1, new)
-        self.SizeColumns()
+
+        # Sizing the columns measures every row in the list, which is far too much work to do
+        # at every keystroke of a long batch.  The right-hand column has taken up all the room
+        # left over, so what is typed nearly always fits in it with a great deal to spare, and
+        # the columns are re-sized only on the rare keystroke where it would not.
+        if len(names) > 0:
+            longest=self.lcFiles.GetTextExtent(max(names, key=len)).width
+            if longest+self.FromDIP(ColumnGap) > self.lcFiles.GetColumnWidth(1):
+                self.SizeColumns()
 
 
     # Each column is wide enough for what is in it, with a gap between the two of them, and
@@ -670,6 +706,11 @@ class ScanRenamerFrame(wx.Frame):
 
 
     def OnRename(self, event) -> None:
+        with WatchingPaused(self):
+            self.RenameBatch()
+
+
+    def RenameBatch(self) -> None:
         title=self.tTitle.GetValue().strip()
         number=self.tNumber.GetValue().strip()
 
@@ -705,7 +746,14 @@ class ScanRenamerFrame(wx.Frame):
             if answer == wx.ID_CANCEL:
                 return
             if answer == wx.ID_YES:
-                files=SortByName(files)
+                # Sorting renumbers the files, so the names in the right-hand column are no
+                # longer the ones they would be given.  Rather than rename to names which were
+                # never shown, the batch is put in order and left there to be looked at: the
+                # column now says what would happen, and Rename does it.  The question will
+                # not be asked a second time, the batch being in name order by then.
+                self.SetFiles(SortByName(files))
+                self.stStatus.SetLabel("Sorted into name order.  Check the new names and press Rename again.")
+                return
 
         pairs=BuildNewNames(files, title, number)
 
@@ -750,6 +798,11 @@ class ScanRenamerFrame(wx.Frame):
 
 
     def OnUndo(self, event) -> None:
+        with WatchingPaused(self):
+            self.UndoLastBatch()
+
+
+    def UndoLastBatch(self) -> None:
         if len(self.State["Batches"]) == 0:
             return
 

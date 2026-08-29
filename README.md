@@ -34,8 +34,13 @@ needs both.
 
 The order in which the files are supplied is the order in which they are numbered.  If that
 order is not name order, ScanRenamer says so and offers a choice of sorting them by name,
-numbering them as supplied, or cancelling.  Choosing to sort renumbers them, so the names
-actually given are not the ones the right-hand column was showing.
+numbering them as supplied, or cancelling.
+
+Sorting renumbers the files, so it does not rename them there and then -- that would give
+names the right-hand column never showed.  Instead the batch is put in order and left for you
+to look at, the column now saying what each file would become, and pressing **Rename** again
+does it.  The question is not asked twice, the batch being in name order by then.  **Keep as
+supplied** renames straight away.
 
 ### Name order
 
@@ -113,6 +118,10 @@ file can never be picked back up by the watcher.
 The watcher does not wait for the scanner to finish writing a page, so a file can appear in
 the list a moment before it is complete.  Press **Rename** when the scanning is done: a file
 the scanner still has open cannot be renamed, and the whole batch would be rolled back.
+
+The watcher is held still while a batch is being renamed or put back.  Windows goes on
+delivering timer ticks while a dialog is up, so without that a page arriving in the middle of
+a question could reload the batch under the work.
 
 ## ScanRenamer state.json
 
