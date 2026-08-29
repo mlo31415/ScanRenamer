@@ -41,6 +41,13 @@ scanned, until Rename is pressed.  A rename which would produce a name that
 looks like scanner output is refused, so that the watcher can never pick a
 renamed file back up.
 
+Nothing is ever renamed over the top of an existing file.  Anything in the way --
+a file of the batch which would land on a name already taken by a file outside
+it, or two files of the batch which would end up with the same name -- is
+reported, naming both the file being renamed and the file standing in its way,
+and the whole batch is left alone.  The same goes for undoing a rename, where a
+scan made since may have taken one of the names the batch is going back to.
+
 The title string is remembered from batch to batch (and from run to run); the
 number is cleared after each successful batch, since it always changes.
 
@@ -161,9 +168,16 @@ def RenameFiles(pairs: list[tuple[str, str]]) -> str:
             return f"Could not rename {os.path.basename(old)}:\n{e}\n\nNothing was renamed."
         temps.append(tmp)
 
-    # Pass 2: move each of them to its real new name.
+    # Pass 2: move each of them to its real new name.  Every file of the batch is out of the
+    # way under a temporary name by now, so anything sitting at one of these names is a file
+    # which has appeared since the batch was looked over -- and it is not to be overwritten.
     done: list[tuple[str, str]]=[]
     for (old, new), tmp in zip(pairs, temps):
+        if os.path.exists(new):
+            PutBack([(n, o) for o, n in done])
+            PutBack(list(zip(temps[len(done):], [p[0] for p in pairs[len(done):]])))
+            return (f"{os.path.basename(new)} appeared in {os.path.dirname(new)} while the files were "
+                    f"being renamed, and {os.path.basename(old)} would have overwritten it.\n\nNothing was renamed.")
         try:
             os.rename(tmp, new)
         except OSError as e:
@@ -173,6 +187,42 @@ def RenameFiles(pairs: list[tuple[str, str]]) -> str:
         done.append((old, new))
 
     return ""
+
+
+# Look for anything these renames would overwrite, and say what it is.  Returns "" when
+# there is nothing in the way, and otherwise a line for each conflict, naming both the file
+# being renamed and the file standing in its way.
+# A new name which is the old name of another file in the batch is not a conflict: the
+# renaming is done in two passes so that a batch may shuffle its own names about freely.
+def ConflictReport(pairs: list[tuple[str, str]]) -> str:
+    olds={os.path.normcase(old) for old, _ in pairs}
+    conflicts: list[str]=[]
+
+    # Two files of the batch which would end up with the same name.  One would overwrite
+    # the other, and which of them survived would be a matter of luck.
+    claimed: dict[str, str]={}
+    for old, new in pairs:
+        key=os.path.normcase(new)
+        if key in claimed:
+            conflicts.append(f"{os.path.basename(claimed[key])} and {os.path.basename(old)} "
+                             f"would both become {os.path.basename(new)}")
+        else:
+            claimed[key]=old
+
+    # A name which already belongs to some file which is not part of the batch.
+    for old, new in pairs:
+        if os.path.exists(new) and os.path.normcase(new) not in olds:
+            conflicts.append(f"{os.path.basename(old)} would become {os.path.basename(new)}, "
+                             f"which already exists in {os.path.dirname(new)}")
+
+    if len(conflicts) == 0:
+        return ""
+
+    shown=conflicts[:6]
+    report="\n".join("    "+c for c in shown)
+    if len(conflicts) > len(shown):
+        report+=f"\n    ...and {len(conflicts)-len(shown)} more"
+    return report
 
 
 # Rename each (from, to) pair, ignoring failures.  This is used only to put back a
@@ -495,12 +545,10 @@ class ScanRenamerFrame(wx.Frame):
                           "ScanRenamer", wx.OK|wx.ICON_ERROR)
             return
 
-        # A new name may be the old name of another file in the batch (the renaming is done in
-        # two passes so that that works), but it may not be the name of a file outside the batch.
-        olds={os.path.normcase(o) for o, _ in pairs}
-        blocked=[n for _, n in pairs if os.path.exists(n) and os.path.normcase(n) not in olds]
-        if len(blocked) > 0:
-            wx.MessageBox(f"{os.path.basename(blocked[0])} already exists.\n\nNothing was renamed.",
+        # Nothing is ever renamed over the top of an existing file.
+        report=ConflictReport(pairs)
+        if report != "":
+            wx.MessageBox(f"Renaming would overwrite a file:\n\n{report}\n\nNothing was renamed.",
                           "ScanRenamer", wx.OK|wx.ICON_ERROR)
             return
 
@@ -534,6 +582,14 @@ class ScanRenamerFrame(wx.Frame):
         if len(missing) > 0:
             wx.MessageBox(f"{os.path.basename(missing[0])} is no longer there, so the rename of "
                           f"{batch['When']} cannot be undone.", "ScanRenamer", wx.OK|wx.ICON_ERROR)
+            return
+
+        # Nor does putting a batch back overwrite anything -- a scan made since the rename may
+        # well have been given one of the names the batch is about to go back to.
+        report=ConflictReport(pairs)
+        if report != "":
+            wx.MessageBox(f"Putting the files back would overwrite a file:\n\n{report}\n\n"
+                          f"Nothing was put back.", "ScanRenamer", wx.OK|wx.ICON_ERROR)
             return
 
         msg=RenameFiles(pairs)

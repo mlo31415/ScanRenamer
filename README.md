@@ -41,6 +41,27 @@ for the next run of the program); the number is blanked, since it is always diff
 **Undo Last Rename** puts the most recent batch back the way it was.  **Exit** closes the
 program.
 
+## Nothing is ever overwritten
+
+A rename never writes over an existing file.  Before anything is renamed, ScanRenamer looks
+for two kinds of trouble:
+
+* a file which would land on a name already belonging to a file which is not part of the
+  batch, and
+* two files of the batch which would end up with the same name.
+
+Either one is reported, naming both the file being renamed and the file standing in its way
+(with the folder it is in), and the whole batch is left exactly as it was -- it is never a
+matter of some files being renamed and others not.
+
+Undo is protected the same way: a scan made since the rename may well have been given one of
+the names the batch is about to go back to, and if so nothing is put back.
+
+Renaming a batch to names it is already using is fine, and so is any shuffling of names
+within a batch -- the renaming is done in two passes for exactly that reason.  As a last
+guard, if a file appears at one of the new names while the batch is being renamed, the
+renaming stops and everything already done is put back.
+
 ## The watched folder
 
 `ScanRenamer settings.txt`, in the program's directory, names the folder to watch and the
