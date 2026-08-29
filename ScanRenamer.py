@@ -61,9 +61,11 @@ taken one of the names the batch is going back to.
 
 Rename, the button the work is done with, is picked out in light yellow.
 
-The title string is remembered from batch to batch (and from run to run); the
-number is cleared after each successful batch, since it always changes, and the
-cursor is put in the number box ready for the next one.
+The title string is remembered from batch to batch and from one run of the
+program to the next: it is saved both when a batch is renamed and when the
+window is closed, so a name typed but not yet used is not lost.  The number is
+cleared after each successful batch, since it always changes, and the cursor is
+put in the number box ready for the next one.
 
 Every batch is written to "ScanRenamer state.json" alongside this program as a
 table of old-name/new-name pairs, and Undo Last Rename puts the most recent batch
@@ -851,6 +853,15 @@ class ScanRenamerFrame(wx.Frame):
     # arrives at a half-destroyed frame.
     def OnClose(self, event) -> None:
         self.Timer.Stop()
+
+        # The name is kept from one run of the program to the next.  Renaming a batch saves
+        # it, but a name typed and not yet used would go with the window, so it is saved on
+        # the way out as well -- as is the emptying of the box, if that is what was done.
+        title=self.tTitle.GetValue().strip()
+        if title != self.State["Title"]:
+            self.State["Title"]=title
+            WriteState(self.State)
+
         event.Skip()
 
 
