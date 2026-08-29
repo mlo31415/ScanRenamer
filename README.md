@@ -70,7 +70,9 @@ both when a batch is renamed and when the window is closed, so a name typed and 
 is still there next time.  (Emptying the box is remembered too: that is what you did.)
 
 **Undo Last Rename** puts the most recent batch back the way it was.  **Exit** closes the
-program.
+program -- asking first if the batch still holds files which have not been renamed, since the
+gathering of them and the order they were put in would otherwise have to be done again.  The
+window's own close box asks the same question.
 
 ## Nothing is ever overwritten
 

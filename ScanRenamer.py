@@ -59,7 +59,9 @@ would end up with the same name, or the same file supplied twice.  The same
 looking-over is done before undoing a rename, where a scan made since may have
 taken one of the names the batch is going back to.
 
-Rename, the button the work is done with, is picked out in light yellow.
+Rename, the button the work is done with, is picked out in light yellow.  Exit
+asks first if the batch still holds files which have not been renamed, as does
+the window's own close box.
 
 The title string is remembered from batch to batch and from one run of the
 program to the next: it is saved both when a batch is renamed and when the
@@ -852,6 +854,17 @@ class ScanRenamerFrame(wx.Frame):
     # Stop looking at the watched folder before the window goes away, so that no timer tick
     # arrives at a half-destroyed frame.
     def OnClose(self, event) -> None:
+        # A batch which has been supplied but not yet renamed is worth asking about.  The
+        # files themselves are in no danger, but the gathering of them -- and the order they
+        # were put in -- would have to be done again.
+        if len(self.Files) > 0 and event.CanVeto():
+            with WatchingPaused(self):
+                answer=wx.MessageBox(f"{len(self.Files)} files have not been renamed yet.\n\nExit anyway?",
+                                     "ScanRenamer", wx.YES_NO|wx.ICON_QUESTION)
+            if answer != wx.YES:
+                event.Veto()
+                return
+
         self.Timer.Stop()
 
         # The name is kept from one run of the program to the next.  Renaming a batch saves
